@@ -146,15 +146,26 @@ const handleDownload = async (message) => {
 .messages-container {
   flex: 1;
   overflow-y: auto;
-  padding: 40px 15%;
+  padding: 40px clamp(20px, 4vw, 48px);
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 20px;
   z-index: 1;
+  align-items: center;
+}
+
+.messages-container > * {
+  width: min(1040px, 100%);
 }
 
 .input-container {
-  padding: 0 15% 40px;
+  padding: 0 clamp(20px, 4vw, 48px) 40px;
   z-index: 10;
+  display: flex;
+  justify-content: center;
+}
+
+.input-container > * {
+  width: min(1040px, 100%);
 }
 </style>

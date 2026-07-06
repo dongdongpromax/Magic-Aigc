@@ -15,6 +15,9 @@ describe('ImageMessageCard', () => {
       },
     })
 
+    expect(wrapper.get('[data-role="message-row"]').classes()).toContain('is-assistant')
+    expect(wrapper.get('[data-role="message-badge"]').text()).toBe('AI')
+    expect(wrapper.get('[data-role="message-title"]').text()).toBe('图像结果')
     expect(wrapper.text()).toContain('继续细化')
     expect(wrapper.text()).toContain('下载原图')
   })
