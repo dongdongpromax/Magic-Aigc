@@ -50,7 +50,7 @@ const handleDownload = async (message) => {
 </script>
 
 <template>
-  <div class="chat-area">
+  <div class="chat-area scene-visible">
     <div class="header-actions">
       <ConnectionBadge
         :has-config="chatStore.hasConfig"
@@ -99,7 +99,23 @@ const handleDownload = async (message) => {
   flex-direction: column;
   height: 100%;
   position: relative;
-  background-color: $bg-base;
+  background: transparent;
+
+  &::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background:
+      radial-gradient(circle at 52% 18%, rgba(108, 255, 214, 0.05), transparent 22%),
+      linear-gradient(180deg, rgba(5, 7, 11, 0.12), rgba(5, 7, 11, 0.28));
+    z-index: 0;
+  }
+}
+
+.scene-visible > * {
+  position: relative;
+  z-index: 1;
 }
 
 .header-actions {

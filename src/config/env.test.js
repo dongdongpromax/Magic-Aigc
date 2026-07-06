@@ -36,6 +36,7 @@ describe('getDefaultAppConfig', () => {
       baseURL: 'https://openrouter.ai/api/v1',
       defaultModel: 'openai/gpt-image-2',
       requestMode: 'openrouter-image',
+      defaultSize: 'auto',
     })
   })
 })

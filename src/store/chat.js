@@ -9,19 +9,24 @@ import { loadPersistedState, savePersistedState } from '@/utils/storage'
 export const useChatStore = defineStore('chat', () => {
   const defaults = getDefaultAppConfig()
   const restored = loadPersistedState()
+  const restoredAppConfig = restored?.appConfig || {}
+  const normalizedDefaultSize =
+    restoredAppConfig.defaultSize && restoredAppConfig.defaultSize !== '1024x1024'
+      ? restoredAppConfig.defaultSize
+      : defaults.defaultSize
 
-  const appConfig = reactive(
-    restored?.appConfig || {
-      baseURL: defaults.baseURL,
-      apiKey: defaults.apiKey,
-      defaultModel: defaults.defaultModel,
-      requestMode: defaults.requestMode,
-      defaultSize: defaults.defaultSize,
-      defaultQuality: defaults.defaultQuality,
-      defaultN: defaults.defaultN,
-      timeout: defaults.timeout,
-    },
-  )
+  const appConfig = reactive({
+    baseURL: defaults.baseURL,
+    apiKey: defaults.apiKey,
+    defaultModel: defaults.defaultModel,
+    requestMode: defaults.requestMode,
+    defaultSize: normalizedDefaultSize,
+    defaultQuality: defaults.defaultQuality,
+    defaultN: defaults.defaultN,
+    timeout: defaults.timeout,
+    ...restoredAppConfig,
+    defaultSize: normalizedDefaultSize,
+  })
 
   const topics = ref(restored?.topics || [])
   const currentTopicId = ref(restored?.currentTopicId || '')
