@@ -1,5 +1,6 @@
 <script setup>
-import { computed, onMounted } from 'vue'
+import { computed, onBeforeUnmount, onMounted } from 'vue'
+import { Maximize2, Minimize2 } from 'lucide-vue-next'
 import { useChatStore } from '@/store/chat'
 import { triggerBrowserDownload } from '@/utils/download'
 import ConnectionBadge from './ConnectionBadge.vue'
@@ -63,8 +64,22 @@ const handleDownload = async (message) => {
   })
 }
 
+/**
+ * 改动2: Esc 退出聊天区全屏
+ */
+function handleWindowKeydown(event) {
+  if (event.key === 'Escape' && chatStore.isChatFullscreen) {
+    chatStore.toggleChatFullscreen()
+  }
+}
+
 onMounted(() => {
   chatStore.bootstrap()
+  window.addEventListener('keydown', handleWindowKeydown)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', handleWindowKeydown)
 })
 </script>
 
@@ -76,6 +91,16 @@ onMounted(() => {
         :has-error="Boolean(chatStore.lastError)"
         @click="chatStore.openSettings"
       />
+      <button
+        class="fullscreen-btn"
+        type="button"
+        data-action="toggle-fullscreen"
+        :title="chatStore.isChatFullscreen ? '退出全屏' : '全屏对话'"
+        @click="chatStore.toggleChatFullscreen"
+      >
+        <Minimize2 v-if="chatStore.isChatFullscreen" :size="16" />
+        <Maximize2 v-else :size="16" />
+      </button>
     </div>
 
     <div class="messages-container" v-if="currentMessages.length > 0">
@@ -144,6 +169,26 @@ onMounted(() => {
   display: flex;
   gap: 12px;
   z-index: 10;
+}
+
+/* 改动2: 全屏切换按钮 */
+.fullscreen-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(18, 18, 18, 0.72);
+  color: rgba(255, 255, 255, 0.88);
+  cursor: pointer;
+  transition: all 0.2s ease;
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.14);
+  }
 }
 
 .empty-state {

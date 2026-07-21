@@ -77,7 +77,7 @@ describe('chat reference images', () => {
       defaultQuality: 'high',
       defaultN: 1,
       requestMode: 'openrouter-image',
-      timeout: 120000,
+      timeout: 1200000,
     })
     updateSettingsMock.mockResolvedValue({})
     deleteReferenceImageMock.mockResolvedValue({ success: true })
@@ -96,9 +96,7 @@ describe('chat reference images', () => {
 
     store.removeReferenceImage('ref-1')
 
-    expect(store.currentDraft.referenceImages).toEqual([
-      expect.objectContaining({ id: 'ref-2' }),
-    ])
+    expect(store.currentDraft.referenceImages).toEqual([expect.objectContaining({ id: 'ref-2' })])
   })
 
   it('变更参考图时同步远程草稿，且不再写入 localStorage', async () => {

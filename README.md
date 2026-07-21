@@ -32,7 +32,7 @@ npm run dev
 
 ```bash
 VITE_BACKEND_BASE_URL=http://127.0.0.1:4398
-VITE_BACKEND_TIMEOUT=120000
+VITE_BACKEND_TIMEOUT=1200000
 # 可选：本地图片桥接服务地址。仅在需要把生成图额外保存到项目本地目录时配置；
 # 默认为空（不启用）。后端 generateImageMessage 已统一把图片写入 server/storage/。
 VITE_LOCAL_BRIDGE_URL=

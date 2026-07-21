@@ -71,8 +71,6 @@ export const useChatStore = defineStore('chat', () => {
   })
   /** @type {Map<string, ReturnType<typeof setTimeout>>} 草稿防抖定时器（按 topicId 索引） */
   const draftTimers = new Map()
-  /** @type {ReturnType<typeof setTimeout> | null} 设置防抖定时器 */
-  let settingsTimer = null
 
   /**
    * 生成唯一 ID
@@ -179,10 +177,22 @@ export const useChatStore = defineStore('chat', () => {
       getRemoteDraft(topicId),
     ])
 
-    messages.value = [
-      ...messages.value.filter((message) => message.topicId !== topicId),
-      ...nextMessages,
-    ]
+    // 改动5: 保留内存中该主题 pending 的消息，避免生成中切走再切回时消息丢失
+    // - generating 状态消息后端永不存（saveGeneratedConversation 只存 done 状态），必留
+    // - user_prompt 若后端没存（生成未完成）则保留；已存（生成完成）则丢弃避免重复
+    const remoteUserPrompts = new Set(
+      nextMessages.filter((m) => m.type === 'user_prompt').map((m) => m.prompt),
+    )
+    const keptPending = messages.value.filter(
+      (message) =>
+        message.topicId === topicId &&
+        ((message.type === 'system_status' && message.status === 'generating') ||
+          (message.type === 'user_prompt' && !remoteUserPrompts.has(message.prompt))),
+    )
+
+    messages.value = [...messages.value.filter((m) => m.topicId !== topicId), ...nextMessages, ...keptPending].sort(
+      (a, b) => a.createdAt - b.createdAt,
+    )
     drafts[topicId] = nextDraft
     return topicId
   }
@@ -385,13 +395,24 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   /**
-   * 防抖持久化设置
+   * 改动1: 设置保存状态（idle/saving/saved/error）
+   *
+   * 替代原 watch 自动防抖保存。SettingsDrawer 用本地副本编辑，点「保存」才调 saveSettings，
+   * 通过此状态反馈保存结果，解决用户"保存无效"的体感问题。
    */
-  function scheduleSettingsPersist() {
-    clearTimeout(settingsTimer)
-    settingsTimer = setTimeout(() => {
-      // P1-3: 取消静默吞错
-      updateSettings({
+  const settingsSaveStatus = ref('idle')
+
+  /**
+   * 改动1: 显式保存设置到后端
+   *
+   * 调 updateSettings（PUT /api/settings）持久化 baseURL/模型/尺寸/张数/请求模式/超时，
+   * 成功后用返回值回填 appConfig 并置 saved，失败置 error 并写 lastError。
+   * @returns {Promise<boolean>} 是否保存成功
+   */
+  async function saveSettings() {
+    settingsSaveStatus.value = 'saving'
+    try {
+      const saved = await updateSettings({
         baseURL: appConfig.baseURL,
         defaultModel: appConfig.defaultModel,
         defaultSize: appConfig.defaultSize,
@@ -399,10 +420,27 @@ export const useChatStore = defineStore('chat', () => {
         defaultN: appConfig.defaultN,
         requestMode: appConfig.requestMode,
         timeout: appConfig.timeout,
-      }).catch((err) => {
-        lastError.value = `设置保存失败：${err?.message || ''}`
       })
-    }, 250)
+      Object.assign(appConfig, saved)
+      settingsSaveStatus.value = 'saved'
+      lastError.value = ''
+      return true
+    } catch (err) {
+      settingsSaveStatus.value = 'error'
+      lastError.value = `设置保存失败：${err?.message || ''}`
+      return false
+    }
+  }
+
+  /**
+   * 改动2: 聊天区全屏状态（隐藏侧栏，消息+输入铺满整个窗口）
+   *
+   * 提升到 store 便于 MainLayout/ChatArea/Sidebar 联动 + Esc 监听统一。
+   */
+  const isChatFullscreen = ref(false)
+
+  function toggleChatFullscreen() {
+    isChatFullscreen.value = !isChatFullscreen.value
   }
 
   /**
@@ -414,8 +452,10 @@ export const useChatStore = defineStore('chat', () => {
    * @param {{ images?: Array<object>; revisedPrompt?: string }} result 后端返回结果
    * @param {string} prompt 用户 prompt
    */
-  async function completeImageGeneration(result, prompt) {
-    const topicId = currentTopicId.value
+  async function completeImageGeneration(result, prompt, originTopicId = currentTopicId.value) {
+    // 改动5: 绑定发起时的 originTopicId，生成中切换主题后结果仍正确归位发起主题，
+    // 不污染切换后主题的草稿，也不让原主题 generating 状态卡死
+    const topicId = originTopicId
     const draft = ensureDraft(topicId)
     const topic = getTopicById(topicId)
     const latestGeneratingIndex = messages.value.findLastIndex(
@@ -485,8 +525,9 @@ export const useChatStore = defineStore('chat', () => {
    * 图像生成失败处理：移除 generating 状态消息，追加错误消息
    * @param {Error} error
    */
-  function failImageGeneration(error) {
-    const topicId = currentTopicId.value
+  function failImageGeneration(error, originTopicId = currentTopicId.value) {
+    // 改动5: 绑定发起时的 originTopicId，失败消息归位发起主题
+    const topicId = originTopicId
     const readableError = getReadableError(error)
     const latestGeneratingIndex = messages.value.findLastIndex(
       (message) =>
@@ -558,32 +599,12 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   /**
-   * P2-1: 清理所有定时器，防止 HMR 场景下内存泄漏
+   * P2-1: 清理所有草稿定时器，防止 HMR 场景下内存泄漏
    */
   function dispose() {
     draftTimers.forEach((timer) => clearTimeout(timer))
     draftTimers.clear()
-    if (settingsTimer) {
-      clearTimeout(settingsTimer)
-      settingsTimer = null
-    }
   }
-
-  watch(
-    () => ({
-      baseURL: appConfig.baseURL,
-      defaultModel: appConfig.defaultModel,
-      defaultSize: appConfig.defaultSize,
-      defaultQuality: appConfig.defaultQuality,
-      defaultN: appConfig.defaultN,
-      requestMode: appConfig.requestMode,
-      timeout: appConfig.timeout,
-    }),
-    () => {
-      scheduleSettingsPersist()
-    },
-    { deep: true },
-  )
 
   watch(
     () => (currentTopicId.value ? serializeDraft(ensureDraft(currentTopicId.value)) : null),
@@ -603,6 +624,8 @@ export const useChatStore = defineStore('chat', () => {
     currentMessages,
     preview,
     settingsVisible,
+    settingsSaveStatus,
+    isChatFullscreen,
     lastError,
     isBootstrapping,
     isAddingReference,
@@ -621,6 +644,8 @@ export const useChatStore = defineStore('chat', () => {
     removeReferenceImage,
     completeImageGeneration,
     failImageGeneration,
+    saveSettings,
+    toggleChatFullscreen,
     openSettings,
     closeSettings,
     openPreview,

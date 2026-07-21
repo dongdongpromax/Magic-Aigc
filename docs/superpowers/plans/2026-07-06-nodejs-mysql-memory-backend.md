@@ -112,6 +112,7 @@
 ### Task 1: 后台脚手架与 Docker 基础设施
 
 **Files:**
+
 - Create: `server/package.json`
 - Create: `server/Dockerfile`
 - Create: `docker-compose.yml`
@@ -143,7 +144,7 @@ describe('server bootstrap', () => {
           defaultQuality: 'high',
           defaultN: 1,
           requestMode: 'openrouter-image',
-          timeout: 120000,
+          timeout: 1200000,
         }),
       },
     })
@@ -222,7 +223,7 @@ const app = createApp({
       defaultQuality: 'high',
       defaultN: 1,
       requestMode: 'openrouter-image',
-      timeout: 120000,
+      timeout: 1200000,
     }),
   },
 })
@@ -241,7 +242,7 @@ services:
       MYSQL_DATABASE: ai_chat_draw
       MYSQL_ROOT_PASSWORD: root
     ports:
-      - "3306:3306"
+      - '3306:3306'
     volumes:
       - mysql-data:/var/lib/mysql
       - ./server/sql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
@@ -254,7 +255,7 @@ services:
     depends_on:
       - mysql
     ports:
-      - "4398:4398"
+      - '4398:4398'
 
 volumes:
   mysql-data:
@@ -308,6 +309,7 @@ git commit -m "feat: scaffold backend and docker services"
 ### Task 2: MySQL 仓储层与主题、草稿、设置 API
 
 **Files:**
+
 - Create: `server/src/db/repositories/settingsRepository.js`
 - Create: `server/src/db/repositories/topicRepository.js`
 - Create: `server/src/db/repositories/draftRepository.js`
@@ -335,7 +337,7 @@ describe('topic routes', () => {
           defaultQuality: 'high',
           defaultN: 1,
           requestMode: 'openrouter-image',
-          timeout: 120000,
+          timeout: 1200000,
         }),
       },
       topicRepository: {
@@ -464,7 +466,7 @@ export function createSettingsRepository(pool) {
             defaultQuality: 'high',
             defaultN: 1,
             requestMode: 'openrouter-image',
-            timeout: 120000,
+            timeout: 1200000,
           }
     },
   }
@@ -498,10 +500,13 @@ export function createTopicRoutes({ topicRepository, draftRepository }) {
 // server/src/app.js
 import { createTopicRoutes } from './modules/topics/routes.js'
 
-app.use('/api', createTopicRoutes({
-  topicRepository: deps.topicRepository,
-  draftRepository: deps.draftRepository,
-}))
+app.use(
+  '/api',
+  createTopicRoutes({
+    topicRepository: deps.topicRepository,
+    draftRepository: deps.draftRepository,
+  }),
+)
 ```
 
 - [ ] **Step 5: 增加设置更新与主题创建接口**
@@ -538,6 +543,7 @@ git commit -m "feat: add mysql repositories and topic routes"
 ### Task 3: 图片上传、OpenRouter 代理与本地文件落盘
 
 **Files:**
+
 - Create: `server/src/modules/images/routes.js`
 - Create: `server/src/modules/images/openrouterClient.js`
 - Create: `server/src/modules/images/fileStorage.js`
@@ -719,6 +725,7 @@ git commit -m "feat: add image upload proxy and file storage"
 ### Task 4: 前端 API 服务层与 Vite 代理
 
 **Files:**
+
 - Create: `src/services/backendClient.js`
 - Create: `src/services/chatApi.js`
 - Create: `src/services/settingsApi.js`
@@ -812,7 +819,7 @@ export function getDefaultAppConfig() {
     defaultSize: 'auto',
     defaultQuality: 'high',
     defaultN: 1,
-    timeout: 120000,
+    timeout: 1200000,
   }
 }
 ```
@@ -854,6 +861,7 @@ git commit -m "feat: add frontend backend client and proxy configuration"
 ### Task 5: 前端 store 迁移到数据库记忆
 
 **Files:**
+
 - Modify: `src/store/chat.js`
 - Modify: `src/store/chat.test.js`
 - Modify: `src/store/chat.references.test.js`
@@ -921,7 +929,7 @@ export const useChatStore = defineStore('chat', {
       defaultSize: 'auto',
       defaultQuality: 'high',
       defaultN: 1,
-      timeout: 120000,
+      timeout: 1200000,
     },
     topics: [],
     messages: [],
@@ -1006,6 +1014,7 @@ git commit -m "feat: migrate frontend store to backend persistence"
 ### Task 6: 文档收口与整体验证
 
 **Files:**
+
 - Modify: `README.md`
 - Modify: `.env.example`
 - Modify: `server/.env.example`

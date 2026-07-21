@@ -36,19 +36,19 @@ const titleLabel = computed(() => {
 
 <template>
   <div class="message-row" :class="[rowClass, message.type]" data-role="message-row">
-    <div class="message-side" data-role="message-side">
-      <div class="message-badge" data-role="message-badge">{{ badgeLabel }}</div>
-      <div class="message-meta">
-        <strong data-role="message-title">{{ titleLabel }}</strong>
-      </div>
+    <!-- 改动3: 系统状态居中胶囊 + spinner 动画 -->
+    <div v-if="rowClass === 'is-system'" class="status-pill" data-role="message-body">
+      <span class="spinner"></span>
+      <span>{{ content }}</span>
     </div>
 
-    <div
-      class="message-body"
-      :class="{ 'compact-status': rowClass === 'is-system' }"
-      data-role="message-body"
-    >
-      <div class="bubble-inner">{{ content }}</div>
+    <!-- 改动3: 用户/AI 消息改为现代卡片式（去掉左侧 avatar 徽章栏） -->
+    <div v-else class="message-card" data-role="message-body">
+      <div class="card-header">
+        <span class="role-tag">{{ badgeLabel }}</span>
+        <span class="role-title">{{ titleLabel }}</span>
+      </div>
+      <div class="card-content">{{ content }}</div>
     </div>
   </div>
 </template>
@@ -57,168 +57,114 @@ const titleLabel = computed(() => {
 .message-row {
   display: flex;
   width: 100%;
-  gap: 16px;
   align-items: flex-start;
 }
 
-.message-side {
-  width: 112px;
-  flex-shrink: 0;
-  display: grid;
-  gap: 10px;
-  padding-top: 4px;
+/* 改动3: 系统状态居中胶囊 + 旋转 spinner */
+.message-row.is-system {
+  justify-content: center;
 }
 
-.message-badge {
-  width: 42px;
-  height: 42px;
-  border-radius: 14px;
+.status-pill {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  font-size: 13px;
-  font-weight: 600;
-  color: rgba(255, 255, 255, 0.96);
-  background:
-    linear-gradient(180deg, rgba(83, 136, 255, 0.28) 0%, rgba(52, 80, 148, 0.22) 100%),
-    rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(116, 164, 255, 0.28);
-  box-shadow:
-    0 12px 24px rgba(0, 0, 0, 0.24),
-    inset 0 1px 0 rgba(255, 255, 255, 0.08);
-}
-
-.message-meta {
-  display: grid;
-  gap: 4px;
-
-  strong {
-    font-size: 12px;
-    font-weight: 600;
-    color: rgba(255, 255, 255, 0.88);
-    letter-spacing: 0.02em;
-  }
-}
-
-.message-body {
-  flex: 1;
-  min-width: 0;
-
-  &.compact-status {
-    max-width: 100%;
-  }
-}
-
-.bubble-inner {
-  max-width: min(860px, 100%);
-  padding: 16px 18px;
-  border-radius: 22px;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.045) 0%, rgba(255, 255, 255, 0.02) 100%),
-    rgba(10, 12, 18, 0.82);
+  gap: 8px;
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 13px;
+}
+
+.spinner {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.18);
+  border-top-color: rgba(119, 168, 255, 0.9);
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* 改动3: 用户/AI 消息卡片 */
+.message-card {
+  max-width: min(720px, 100%);
+  padding: 14px 16px;
+  border-radius: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.22);
+}
+
+.card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.role-tag {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.role-title {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.card-content {
   color: rgba(255, 255, 255, 0.9);
   font-size: 14px;
   line-height: 1.75;
   white-space: pre-wrap;
-  box-shadow:
-    0 18px 48px rgba(0, 0, 0, 0.24),
-    inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 
+/* 改动3: 用户消息靠右蓝色调卡片 */
 .message-row.is-user {
   justify-content: flex-end;
 
-  .message-side {
-    order: 2;
-    width: 92px;
-    justify-items: end;
-    text-align: right;
-  }
-
-  .message-body {
-    display: flex;
-    justify-content: flex-end;
-  }
-
-  .bubble-inner {
-    max-width: min(700px, 100%);
-    border-radius: 22px 22px 10px 22px;
+  .message-card {
+    max-width: min(640px, 100%);
+    border-radius: 18px 18px 4px 18px;
     background:
-      linear-gradient(180deg, rgba(78, 126, 240, 0.26) 0%, rgba(46, 76, 156, 0.18) 100%),
-      rgba(14, 20, 34, 0.92);
-    border-color: rgba(92, 146, 255, 0.24);
+      linear-gradient(180deg, rgba(119, 168, 255, 0.16) 0%, rgba(78, 126, 240, 0.1) 100%);
+    border: 1px solid rgba(119, 168, 255, 0.24);
+
+    .role-tag {
+      background: rgba(119, 168, 255, 0.24);
+    }
   }
 }
 
+/* 改动3: AI 消息靠左浅底卡片 */
 .message-row.is-assistant {
-  .bubble-inner {
-    border-radius: 10px 22px 22px 22px;
-  }
+  justify-content: flex-start;
 
-  .message-badge {
-    background:
-      linear-gradient(180deg, rgba(42, 255, 204, 0.18) 0%, rgba(22, 126, 125, 0.16) 100%),
-      rgba(255, 255, 255, 0.04);
-    border-color: rgba(42, 255, 204, 0.22);
-  }
-}
+  .message-card {
+    border-radius: 4px 18px 18px 18px;
+    background: rgba(255, 255, 255, 0.045);
+    border: 1px solid rgba(255, 255, 255, 0.08);
 
-.message-row.is-system {
-  align-items: center;
-
-  .message-side {
-    width: 92px;
-  }
-
-  .message-badge {
-    width: 36px;
-    height: 36px;
-    border-radius: 12px;
-    background:
-      linear-gradient(180deg, rgba(255, 185, 76, 0.2) 0%, rgba(148, 92, 32, 0.14) 100%),
-      rgba(255, 255, 255, 0.04);
-    border-color: rgba(255, 185, 76, 0.2);
-  }
-
-  .bubble-inner {
-    display: inline-flex;
-    align-items: center;
-    min-height: 44px;
-    padding: 10px 14px;
-    border-radius: 999px;
-    color: rgba(255, 255, 255, 0.72);
-    font-size: 13px;
-    background: rgba(255, 255, 255, 0.04);
-  }
-}
-
-@media (max-width: 860px) {
-  .message-row {
-    gap: 12px;
-  }
-
-  .message-side {
-    width: 72px;
+    .role-tag {
+      background: rgba(42, 255, 204, 0.16);
+    }
   }
 }
 
 @media (max-width: 640px) {
-  .message-row {
-    gap: 10px;
-  }
-
-  .message-side {
-    width: 54px;
-  }
-
-  .message-meta {
-    display: none;
-  }
-
-  .bubble-inner {
+  .message-card {
     max-width: 100%;
-    padding: 14px 16px;
   }
 }
 </style>

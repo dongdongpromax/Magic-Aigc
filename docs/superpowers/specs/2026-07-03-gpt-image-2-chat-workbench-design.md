@@ -172,7 +172,7 @@ const topic = {
   lastPrompt: 'string',
   updatedAt: 0,
   messageCount: 0,
-  status: 'idle|generating|error'
+  status: 'idle|generating|error',
 }
 ```
 
@@ -202,8 +202,8 @@ const assistantImagesMessage = {
       id: 'string',
       url: 'string',
       width: 1024,
-      height: 1024
-    }
+      height: 1024,
+    },
   ],
   model: 'gpt-image-2',
   size: '1024x1024',
@@ -211,7 +211,7 @@ const assistantImagesMessage = {
   n: 1,
   seed: 'string|null',
   sourceMessageId: 'string|null',
-  createdAt: 0
+  createdAt: 0,
 }
 ```
 
@@ -235,7 +235,7 @@ const draftState = {
   size: '1024x1024',
   quality: 'high',
   n: 1,
-  referenceImages: []
+  referenceImages: [],
 }
 ```
 
@@ -343,7 +343,7 @@ VITE_AI_MODE=openai-image
 VITE_AI_DEFAULT_SIZE=1024x1024
 VITE_AI_DEFAULT_QUALITY=high
 VITE_AI_DEFAULT_N=1
-VITE_AI_TIMEOUT=120000
+VITE_AI_TIMEOUT=1200000
 ```
 
 配置规则如下：

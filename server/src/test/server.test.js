@@ -13,7 +13,7 @@ describe('server bootstrap', () => {
           defaultQuality: 'high',
           defaultN: 1,
           requestMode: 'openrouter-image',
-          timeout: 120000,
+          timeout: 1200000,
         }),
       },
     })
@@ -63,7 +63,7 @@ describe('错误处理中间件', () => {
       imageService: {
         // 模拟 DB 错误（含 SQL 细节），不应泄露给客户端
         generateImageMessage: async () => {
-          throw new Error('ER_DUP_ENTRY: Duplicate entry \'topic-1\' for key \'PRIMARY\'')
+          throw new Error("ER_DUP_ENTRY: Duplicate entry 'topic-1' for key 'PRIMARY'")
         },
       },
     })

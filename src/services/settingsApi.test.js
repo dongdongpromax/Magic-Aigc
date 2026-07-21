@@ -8,7 +8,7 @@ const getMock = vi.fn(async () => ({
     defaultQuality: 'high',
     defaultN: 1,
     requestMode: 'backend-proxy',
-    timeout: 120000,
+    timeout: 1200000,
   },
 }))
 

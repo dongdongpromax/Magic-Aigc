@@ -79,7 +79,7 @@ describe('chat store', () => {
       defaultQuality: 'high',
       defaultN: 1,
       requestMode: 'openrouter-image',
-      timeout: 120000,
+      timeout: 1200000,
     })
     updateSettingsMock.mockResolvedValue({})
   })

@@ -1,10 +1,16 @@
 <script setup>
+import { computed } from 'vue'
 import Sidebar from './Sidebar.vue'
 import ChatArea from './ChatArea.vue'
+import { useChatStore } from '@/store/chat'
+
+const chatStore = useChatStore()
+// 改动2: 聊天区全屏时隐藏侧栏，内容区铺满整个窗口
+const isFullscreen = computed(() => chatStore.isChatFullscreen)
 </script>
 
 <template>
-  <div class="main-layout">
+  <div class="main-layout" :class="{ 'is-fullscreen': isFullscreen }">
     <Sidebar />
     <div class="content-wrapper">
       <div class="background-scene" aria-hidden="true">
@@ -27,6 +33,15 @@ import ChatArea from './ChatArea.vue'
   width: 100%;
   height: 100%;
   background-color: $bg-base;
+}
+
+/* 改动2: 全屏时把侧栏滑出视口，内容区自动铺满；:deep 穿透到 Sidebar 根元素 */
+:deep(.sidebar) {
+  transition: margin-left 0.3s ease;
+}
+
+.main-layout.is-fullscreen :deep(.sidebar) {
+  margin-left: -$sidebar-width;
 }
 
 .content-wrapper {

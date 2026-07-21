@@ -19,7 +19,7 @@ vi.mock('@/services/settingsApi', () => ({
     defaultQuality: 'high',
     defaultN: 1,
     requestMode: 'openrouter-image',
-    timeout: 120000,
+    timeout: 1200000,
   }),
   updateSettings: vi.fn().mockResolvedValue({}),
 }))

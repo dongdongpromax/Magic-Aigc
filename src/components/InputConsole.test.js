@@ -1,4 +1,4 @@
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { NSelect } from 'naive-ui'
@@ -50,8 +50,10 @@ describe('InputConsole', () => {
     expect(wrapper.find('[data-panel="size-grid"]').exists()).toBe(true)
     expect(wrapper.get('[data-panel="size-grid"]').attributes('data-placement')).toBe('top')
     expect(wrapper.text()).toContain('auto')
-    expect(wrapper.text()).toContain('1:1 · 1024×1024')
-    expect(wrapper.text()).toContain('16:9 · 1536×864')
+    expect(wrapper.text()).toContain('1:1')
+    expect(wrapper.text()).toContain('1024×1024')
+    expect(wrapper.text()).toContain('16:9')
+    expect(wrapper.text()).toContain('1536×864')
     expect(wrapper.findAllComponents(NSelect)).toHaveLength(2)
   })
 
@@ -158,7 +160,7 @@ describe('InputConsole', () => {
     })
   })
 
-  it('支持输入区全屏展开和收起', async () => {
+  it('粘贴图片时上传为参考图并阻止默认粘贴行为', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
 
@@ -168,15 +170,76 @@ describe('InputConsole', () => {
       },
     })
 
-    const root = wrapper.get('.input-console')
-    const toggle = wrapper.get('[data-action="toggle-fullscreen"]')
+    const store = useChatStore()
+    vi.spyOn(store, 'createTopic').mockResolvedValue('topic-1')
+    vi.spyOn(uploadApiModule, 'uploadReferenceImages').mockResolvedValue([
+      {
+        id: 'ref-paste-1',
+        name: 'paste.png',
+        filePath: '/files/references/paste.png',
+        mimeType: 'image/png',
+        sourceMessageId: null,
+      },
+    ])
 
-    expect(root.classes()).not.toContain('is-expanded')
+    // 构造带图片的剪贴板事件：jsdom 的 ClipboardEvent.clipboardData 不可写，
+    // 用 Object.defineProperty 注入伪 items 列表
+    const file = new File(['demo'], 'image.png', { type: 'image/png' })
+    const event = new Event('paste', { cancelable: true })
+    Object.defineProperty(event, 'clipboardData', {
+      value: {
+        items: [
+          {
+            type: 'image/png',
+            getAsFile: () => file,
+          },
+        ],
+      },
+      configurable: true,
+    })
+    const preventDefault = vi.spyOn(event, 'preventDefault')
 
-    await toggle.trigger('click')
-    expect(root.classes()).toContain('is-expanded')
+    wrapper.find('textarea').element.dispatchEvent(event)
+    await flushPromises()
 
-    await toggle.trigger('click')
-    expect(root.classes()).not.toContain('is-expanded')
+    expect(preventDefault).toHaveBeenCalled()
+    expect(uploadApiModule.uploadReferenceImages).toHaveBeenCalledWith('topic-1', [expect.any(File)])
+    expect(store.currentDraft.referenceImages[0]).toMatchObject({
+      filePath: '/files/references/paste.png',
+      url: '/files/references/paste.png',
+    })
+  })
+
+  it('粘贴纯文本时不触发上传且放行默认粘贴行为', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+
+    const wrapper = mount(InputConsole, {
+      global: {
+        plugins: [pinia],
+      },
+    })
+
+    vi.spyOn(uploadApiModule, 'uploadReferenceImages').mockResolvedValue([])
+
+    const event = new Event('paste', { cancelable: true })
+    Object.defineProperty(event, 'clipboardData', {
+      value: {
+        items: [
+          {
+            type: 'text/plain',
+            getAsFile: () => null,
+          },
+        ],
+      },
+      configurable: true,
+    })
+    const preventDefault = vi.spyOn(event, 'preventDefault')
+
+    wrapper.find('textarea').element.dispatchEvent(event)
+    await flushPromises()
+
+    expect(preventDefault).not.toHaveBeenCalled()
+    expect(uploadApiModule.uploadReferenceImages).not.toHaveBeenCalled()
   })
 })

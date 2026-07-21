@@ -21,7 +21,7 @@ export function createSettingsRepository(pool) {
             defaultQuality: 'high',
             defaultN: 1,
             requestMode: 'openrouter-image',
-            timeout: 120000,
+            timeout: 1200000,
           }
     },
 
@@ -34,7 +34,7 @@ export function createSettingsRepository(pool) {
         defaultN: payload.defaultN || 1,
         // P1-1: 与前端 env.js 默认值和 SettingsDrawer 选项对齐
         requestMode: payload.requestMode || 'openrouter-image',
-        timeout: payload.timeout || 120000,
+        timeout: payload.timeout || 1200000,
       }
 
       await pool.query(

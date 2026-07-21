@@ -18,18 +18,15 @@ defineProps({
 
 <template>
   <div class="message-row is-assistant" data-role="message-row">
-    <div class="message-side">
-      <div class="message-badge" data-role="message-badge">AI</div>
-      <div class="message-meta">
-        <strong data-role="message-title">图像结果</strong>
-        <span>{{ message.model }}</span>
-      </div>
-    </div>
-
-    <div class="image-message-card">
-      <div class="meta-row">
-        <span>{{ message.model }}</span>
-        <span>{{ message.size }}</span>
+    <!-- 改动3: 去掉左侧 avatar 徽章栏，整张卡片靠左展示 -->
+    <div class="image-message-card" data-role="message-body">
+      <div class="card-header">
+        <span class="role-tag">AI</span>
+        <span class="role-title">图像结果</span>
+        <span class="meta-sep">·</span>
+        <span class="meta-item">{{ message.model }}</span>
+        <span class="meta-sep">·</span>
+        <span class="meta-item">{{ message.size }}</span>
       </div>
 
       <div class="image-grid">
@@ -60,54 +57,7 @@ defineProps({
 .message-row {
   display: flex;
   width: 100%;
-  gap: 16px;
   align-items: flex-start;
-}
-
-.message-side {
-  width: 112px;
-  flex-shrink: 0;
-  display: grid;
-  gap: 10px;
-  padding-top: 4px;
-}
-
-.message-badge {
-  width: 42px;
-  height: 42px;
-  border-radius: 14px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 13px;
-  font-weight: 600;
-  color: rgba(255, 255, 255, 0.96);
-  background:
-    linear-gradient(180deg, rgba(42, 255, 204, 0.18) 0%, rgba(22, 126, 125, 0.16) 100%),
-    rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(42, 255, 204, 0.22);
-  box-shadow:
-    0 12px 24px rgba(0, 0, 0, 0.24),
-    inset 0 1px 0 rgba(255, 255, 255, 0.08);
-}
-
-.message-meta {
-  display: grid;
-  gap: 4px;
-
-  strong {
-    font-size: 12px;
-    font-weight: 600;
-    color: rgba(255, 255, 255, 0.88);
-    letter-spacing: 0.02em;
-  }
-
-  span {
-    color: rgba(255, 255, 255, 0.5);
-    font-size: 12px;
-    line-height: 1.5;
-    word-break: break-all;
-  }
 }
 
 .image-message-card {
@@ -116,23 +66,43 @@ defineProps({
   gap: 14px;
   flex: 1;
   min-width: 0;
-  padding: 18px;
-  border-radius: 10px 22px 22px 22px;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.045) 0%, rgba(255, 255, 255, 0.02) 100%),
-    rgba(10, 12, 18, 0.82);
+  padding: 16px 18px;
+  border-radius: 4px 18px 18px 18px;
+  background: rgba(255, 255, 255, 0.045);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow:
-    0 18px 48px rgba(0, 0, 0, 0.24),
-    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.22);
 }
 
-.meta-row {
+.card-header {
   display: flex;
-  gap: 10px;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.role-tag {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: rgba(42, 255, 204, 0.16);
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.role-title {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.meta-sep {
+  color: rgba(255, 255, 255, 0.25);
+  font-size: 12px;
+}
+
+.meta-item {
   color: rgba(255, 255, 255, 0.56);
   font-size: 12px;
-  flex-wrap: wrap;
+  word-break: break-all;
 }
 
 .image-grid {
@@ -185,31 +155,9 @@ defineProps({
   }
 }
 
-@media (max-width: 860px) {
-  .message-row {
-    gap: 12px;
-  }
-
-  .message-side {
-    width: 72px;
-  }
-}
-
 @media (max-width: 640px) {
-  .message-row {
-    gap: 10px;
-  }
-
-  .message-side {
-    width: 54px;
-  }
-
-  .message-meta {
-    display: none;
-  }
-
   .image-message-card {
-    padding: 16px;
+    padding: 14px;
   }
 }
 </style>

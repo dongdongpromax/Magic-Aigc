@@ -4,7 +4,10 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "docker compose up -d --wait mysql && concurrently -k -n web,api -c cyan,magenta \"vite\" \"npm run server:dev\"",
+    "dev:app": "concurrently -k -n web,api -c cyan,magenta \"vite\" \"npm run server:dev\"",
+    "dev:web": "vite",
+    "dev:db": "docker compose up -d --wait mysql",
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run",
@@ -22,6 +25,7 @@
   "devDependencies": {
     "@vitejs/plugin-vue": "^5.0.4",
     "@vue/test-utils": "^2.4.6",
+    "concurrently": "^10.0.3",
     "jsdom": "^26.1.0",
     "sass": "^1.72.0",
     "vite": "^5.2.0",

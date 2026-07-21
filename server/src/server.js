@@ -75,7 +75,15 @@ async function cleanupOrphanFiles(filePaths, rootDir) {
   )
 }
 
-await verifyDatabaseConnection(pool)
+// 启动时探测 DB：失败仅警告不退出，让后端能在 MySQL 未就绪时也启动
+// （/api/health 仍会反映 DB 真实状态；API 调用时 pool 会自动重连）
+try {
+  await verifyDatabaseConnection(pool)
+} catch (err) {
+  console.warn(
+    `[startup] 数据库连接失败，后端仍将启动（API 调用可能失败，请用 \`npm run dev:db\` 启动 MySQL）：${err?.message || err}`,
+  )
+}
 await fileStorage.ensureDirs()
 
 const settingsRepository = createSettingsRepository(pool)

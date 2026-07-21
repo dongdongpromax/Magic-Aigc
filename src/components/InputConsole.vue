@@ -1,6 +1,6 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { Expand, Image as ImageIcon, Minimize, Send, Settings2, Sparkles } from 'lucide-vue-next'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { Image as ImageIcon, Send, Settings2, Sparkles } from 'lucide-vue-next'
 import { NSelect } from 'naive-ui'
 import { requestImages } from '@/services/imageSession'
 import { uploadReferenceImages } from '@/services/uploadApi'
@@ -9,7 +9,6 @@ import { MAX_REFERENCE_IMAGES } from '@/utils/constants'
 
 const chatStore = useChatStore()
 const isLoading = ref(false)
-const isExpanded = ref(false)
 const isSizePanelVisible = ref(false)
 const uploadHint = ref(`最多上传 ${MAX_REFERENCE_IMAGES} 张参考图`)
 // P1-7: 引用共享常量，避免魔法数字散落
@@ -18,31 +17,61 @@ const maxReferenceImages = MAX_REFERENCE_IMAGES
 const models = [{ label: 'GPT Image 2', value: 'openai/gpt-image-2' }]
 
 const counts = [1, 2, 3, 4]
+
+/**
+ * 改动4: 尺寸选项数据结构
+ *
+ * 每项包含 ratio（画面比例，用于可视化小方框）+ pixels（像素标注）+ group（分组），
+ * 让选择器按分组展示并画出对应比例的预览方框，一眼看出画面形状。
+ */
 const sizeOptions = [
-  { label: 'auto', value: 'auto', hint: '自动适配画面比例' },
-  { label: '1:1 · 1024×1024', value: '1024x1024', hint: '标准方图' },
-  { label: '1:1 · 1536×1536', value: '1536x1536', hint: '高清方图' },
-  { label: '4:3 · 1536×1152', value: '1536x1152', hint: '横向构图' },
-  { label: '3:4 · 1152×1536', value: '1152x1536', hint: '竖向构图' },
-  { label: '3:2 · 1536×1024', value: '1536x1024', hint: '电影横幅' },
-  { label: '2:3 · 1024×1536', value: '1024x1536', hint: '海报竖幅' },
-  { label: '16:9 · 1536×864', value: '1536x864', hint: '宽屏画面' },
-  { label: '9:16 · 864×1536', value: '864x1536', hint: '封面竖屏' },
-  { label: '21:9 · 1792×768', value: '1792x768', hint: '超宽场景' },
-  { label: '9:21 · 768×1792', value: '768x1792', hint: '超高构图' },
-  { label: '2:1 · 1536×768', value: '1536x768', hint: '横幅长景' },
-  { label: '1:2 · 768×1536', value: '768x1536', hint: '长竖画幅' },
+  { label: 'auto', value: 'auto', ratio: null, pixels: '自动适配', group: '自动' },
+  { label: '1024×1024', value: '1024x1024', ratio: '1:1', pixels: '1024×1024', group: '方图' },
+  { label: '1536×1536', value: '1536x1536', ratio: '1:1', pixels: '1536×1536', group: '方图' },
+  { label: '1536×1152', value: '1536x1152', ratio: '4:3', pixels: '1536×1152', group: '横图' },
+  { label: '1536×1024', value: '1536x1024', ratio: '3:2', pixels: '1536×1024', group: '横图' },
+  { label: '1536×864', value: '1536x864', ratio: '16:9', pixels: '1536×864', group: '横图' },
+  { label: '1792×768', value: '1792x768', ratio: '21:9', pixels: '1792×768', group: '超宽' },
+  { label: '1536×768', value: '1536x768', ratio: '2:1', pixels: '1536×768', group: '超宽' },
+  { label: '1152×1536', value: '1152x1536', ratio: '3:4', pixels: '1152×1536', group: '竖图' },
+  { label: '1024×1536', value: '1024x1536', ratio: '2:3', pixels: '1024×1536', group: '竖图' },
+  { label: '864×1536', value: '864x1536', ratio: '9:16', pixels: '864×1536', group: '竖图' },
+  { label: '768×1792', value: '768x1792', ratio: '9:21', pixels: '768×1792', group: '竖图' },
+  { label: '768×1536', value: '768x1536', ratio: '1:2', pixels: '768×1536', group: '竖图' },
 ]
+
+/**
+ * 改动4: 按 group 分组后的尺寸选项，供模板分组渲染
+ */
+const sizeGroups = computed(() => {
+  const groups = new Map()
+  for (const option of sizeOptions) {
+    if (!groups.has(option.group)) groups.set(option.group, [])
+    groups.get(option.group).push(option)
+  }
+  return [...groups.entries()].map(([name, options]) => ({ name, options }))
+})
+
 const countOptions = counts.map((count) => ({ label: `${count} 张`, value: count }))
 
 const draft = computed(() => chatStore.currentDraft)
 const canSend = computed(() => Boolean(draft.value.prompt.trim()) && !isLoading.value)
-const selectedSizeLabel = computed(
-  () => sizeOptions.find((item) => item.value === draft.value.size)?.label || draft.value.size,
-)
+const selectedSizeLabel = computed(() => {
+  const item = sizeOptions.find((opt) => opt.value === draft.value.size)
+  if (!item) return draft.value.size
+  return item.ratio ? `${item.ratio} · ${item.pixels}` : item.pixels
+})
 
-function toggleExpanded() {
-  isExpanded.value = !isExpanded.value
+/**
+ * 改动4: 把比例字符串（如 "4:3"）转为 CSS aspect-ratio 值（如 "4 / 3"），
+ * 用于尺寸选项的可视化小方框。auto 用 1:1 占位。
+ * @param {string|null} ratio
+ * @returns {string}
+ */
+function ratioToCss(ratio) {
+  if (!ratio) return '1 / 1'
+  const [w, h] = ratio.split(':').map(Number)
+  return `${w} / ${h}`
 }
 
 function selectSize(value) {
@@ -50,9 +79,14 @@ function selectSize(value) {
   isSizePanelVisible.value = false
 }
 
-async function handleReferenceUpload(event) {
-  const files = Array.from(event.target?.files || [])
-
+/**
+ * 上传参考图文件数组并写入当前草稿
+ *
+ * 抽出为独立函数，供「文件选择上传」和「粘贴图片上传」复用。
+ * 含 16 张上限校验、超限截断、上传后调 chatStore.addReferenceImages 持久化。
+ * @param {Array<File>} files 待上传的图片文件
+ */
+async function uploadReferenceFiles(files) {
   if (!files.length) return
 
   const currentCount = draft.value.referenceImages?.length || 0
@@ -60,7 +94,6 @@ async function handleReferenceUpload(event) {
 
   if (remain <= 0) {
     uploadHint.value = `最多上传 ${maxReferenceImages} 张参考图`
-    event.target.value = ''
     return
   }
 
@@ -84,7 +117,41 @@ async function handleReferenceUpload(event) {
   }))
 
   chatStore.addReferenceImages(parsedFiles)
+}
+
+async function handleReferenceUpload(event) {
+  const files = Array.from(event.target?.files || [])
+  await uploadReferenceFiles(files)
   event.target.value = ''
+}
+
+/**
+ * 粘贴图片到聊天框：从剪贴板提取 image/* 文件，复用上传逻辑添加为参考图
+ *
+ * 若剪贴板含图片则阻止默认粘贴（避免把图片当垃圾文本插入 textarea），
+ * 没有图片则放行默认行为（正常粘贴文本）。
+ * @param {ClipboardEvent} event
+ */
+async function handlePaste(event) {
+  const items = event.clipboardData?.items || []
+  const imageFiles = []
+
+  for (const item of items) {
+    if (item.type?.startsWith('image/')) {
+      const file = item.getAsFile()
+      if (file) {
+        // 剪贴板图片默认文件名是 "image.png"，用时间戳区分避免重名
+        const ext = file.name?.split('.').pop() || 'png'
+        const named = new File([file], `paste-${Date.now()}.${ext}`, { type: file.type })
+        imageFiles.push(named)
+      }
+    }
+  }
+
+  if (imageFiles.length) {
+    event.preventDefault()
+    await uploadReferenceFiles(imageFiles)
+  }
 }
 
 async function removeReferenceImage(id) {
@@ -93,18 +160,10 @@ async function removeReferenceImage(id) {
 }
 
 function handleWindowKeydown(event) {
-  if (event.key === 'Escape' && isExpanded.value) {
-    isExpanded.value = false
-  }
-
   if (event.key === 'Escape' && isSizePanelVisible.value) {
     isSizePanelVisible.value = false
   }
 }
-
-watch(isExpanded, (value) => {
-  document.body.style.overflow = value ? 'hidden' : ''
-})
 
 onMounted(() => {
   window.addEventListener('keydown', handleWindowKeydown)
@@ -112,9 +171,14 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', handleWindowKeydown)
-  document.body.style.overflow = ''
 })
 
+/**
+ * 发送生成请求
+ *
+ * 改动5: 捕获发起时的 originTopicId，传给 completeImageGeneration/failImageGeneration，
+ * 保证生成中切换主题后结果仍正确归位发起主题，不污染其他主题草稿。
+ */
 async function handleSend() {
   if (!draft.value.prompt.trim() || isLoading.value) return
 
@@ -125,16 +189,17 @@ async function handleSend() {
 
   const prompt = draft.value.prompt.trim()
   isLoading.value = true
+  let originTopicId = ''
 
   try {
-    const topicId = await chatStore.addUserPrompt(prompt)
-    const result = await requestImages(topicId, {
+    originTopicId = await chatStore.addUserPrompt(prompt)
+    const result = await requestImages(originTopicId, {
       prompt,
       draft: { ...draft.value },
     })
-    await chatStore.completeImageGeneration(result, prompt)
+    await chatStore.completeImageGeneration(result, prompt, originTopicId)
   } catch (error) {
-    chatStore.failImageGeneration(error)
+    chatStore.failImageGeneration(error, originTopicId)
   } finally {
     isLoading.value = false
   }
@@ -142,7 +207,7 @@ async function handleSend() {
 </script>
 
 <template>
-  <div class="input-console" :class="{ 'is-expanded': isExpanded }">
+  <div class="input-console">
     <div v-if="draft.referenceImages.length" class="reference-strip">
       <div
         v-for="image in draft.referenceImages"
@@ -171,21 +236,13 @@ async function handleSend() {
         <button class="add-btn" type="button" @click="chatStore.openSettings">
           <Settings2 :size="18" />
         </button>
-        <button
-          class="add-btn"
-          type="button"
-          data-action="toggle-fullscreen"
-          @click="toggleExpanded"
-        >
-          <Expand v-if="!isExpanded" :size="18" />
-          <Minimize v-else :size="18" />
-        </button>
       </div>
       <textarea
         v-model="draft.prompt"
-        placeholder="描述你想要生成的内容，或基于上一张图继续细化"
+        placeholder="描述你想要生成的内容，或基于上一张图继续细化（可直接粘贴图片作为参考图）"
         rows="3"
         @keydown.enter.prevent="handleSend"
+        @paste="handlePaste"
       ></textarea>
     </div>
 
@@ -218,17 +275,23 @@ async function handleSend() {
             data-placement="top"
             class="size-grid-panel"
           >
-            <button
-              v-for="item in sizeOptions"
-              :key="item.value"
-              type="button"
-              class="size-grid-option"
-              :class="{ active: draft.size === item.value }"
-              @click="selectSize(item.value)"
-            >
-              <span>{{ item.label }}</span>
-              <small>{{ item.hint }}</small>
-            </button>
+            <div v-for="group in sizeGroups" :key="group.name" class="size-group">
+              <div class="size-group-title">{{ group.name }}</div>
+              <div class="size-group-grid">
+                <button
+                  v-for="item in group.options"
+                  :key="item.value"
+                  type="button"
+                  class="size-grid-option"
+                  :class="{ active: draft.size === item.value }"
+                  @click="selectSize(item.value)"
+                >
+                  <span class="ratio-preview" :style="{ aspectRatio: ratioToCss(item.ratio) }"></span>
+                  <span class="ratio-label">{{ item.ratio || 'auto' }}</span>
+                  <small>{{ item.pixels }}</small>
+                </button>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -302,18 +365,6 @@ async function handleSend() {
       0 0 0 1px rgba(255, 255, 255, 0.05) inset,
       0 0 20px rgba(59, 130, 246, 0.1);
   }
-
-  &.is-expanded {
-    position: fixed;
-    inset: 24px;
-    z-index: 1150;
-    padding: 20px;
-    border-radius: 24px;
-    background: rgba(10, 12, 18, 0.96);
-    box-shadow:
-      0 32px 120px rgba(0, 0, 0, 0.55),
-      inset 0 1px 0 rgba(255, 255, 255, 0.06);
-  }
 }
 
 .input-area {
@@ -361,12 +412,6 @@ async function handleSend() {
     min-height: 72px;
     max-height: 220px;
     font-family: inherit;
-
-    .is-expanded & {
-      min-height: calc(100vh - 240px);
-      max-height: none;
-      font-size: 16px;
-    }
 
     &::placeholder {
       color: $text-muted;
@@ -512,15 +557,18 @@ async function handleSend() {
   padding: 0;
 }
 
+/* 改动4: 比例可视化网格面板，按分组展示 */
 .size-grid-panel {
   position: absolute;
   left: 0;
   bottom: calc(100% + 10px);
   width: min(560px, calc(100vw - 48px));
-  padding: 12px;
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
   border-radius: 16px;
   background: rgba(10, 12, 18, 0.96);
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -530,20 +578,42 @@ async function handleSend() {
   z-index: 20;
 }
 
+.size-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.size-group-title {
+  font-size: 11px;
+  color: $text-muted;
+  letter-spacing: 0.05em;
+  padding-left: 2px;
+}
+
+.size-group-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
 .size-grid-option {
   border: 1px solid rgba(255, 255, 255, 0.06);
   background: rgba(255, 255, 255, 0.03);
   color: $text-primary;
-  border-radius: 14px;
-  padding: 12px;
-  display: grid;
-  gap: 4px;
-  text-align: left;
+  border-radius: 12px;
+  padding: 10px 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  text-align: center;
   cursor: pointer;
   transition: all 0.2s;
 
   small {
     color: $text-secondary;
+    font-size: 11px;
   }
 
   &:hover,
@@ -552,6 +622,22 @@ async function handleSend() {
     background: rgba(53, 96, 191, 0.18);
     box-shadow: 0 0 0 1px rgba(89, 158, 255, 0.14) inset;
   }
+}
+
+/* 比例预览小方框：宽度固定 36px，高度由 aspect-ratio 按比例缩放 */
+.ratio-preview {
+  width: 36px;
+  max-height: 36px;
+  border-radius: 4px;
+  background: linear-gradient(135deg, rgba(119, 168, 255, 0.35), rgba(157, 124, 255, 0.25));
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  flex-shrink: 0;
+}
+
+.ratio-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.92);
 }
 
 .tool-picker:deep(.n-base-selection),
@@ -632,10 +718,6 @@ async function handleSend() {
 }
 
 @media (max-width: 960px) {
-  .input-console.is-expanded {
-    inset: 12px;
-  }
-
   .toolbar {
     flex-direction: column;
     align-items: stretch;
@@ -647,7 +729,10 @@ async function handleSend() {
 
   .size-grid-panel {
     width: min(100vw - 48px, 420px);
-    grid-template-columns: 1fr;
+  }
+
+  .size-group-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .reference-card {

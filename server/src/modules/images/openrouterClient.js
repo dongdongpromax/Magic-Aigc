@@ -19,15 +19,30 @@ export function createOpenRouterClient({ apiKey }) {
         throw new Error('OPENROUTER_API_KEY 未配置，请在 server/.env 中设置 OPENROUTER_API_KEY')
       }
 
-      const response = await axios.post(`${baseURL}/images`, payload, {
-        timeout,
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-      })
+      try {
+        const response = await axios.post(`${baseURL}/images`, payload, {
+          timeout,
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+          },
+        })
 
-      return response.data
+        return response.data
+      } catch (err) {
+        // 翻译上游认证/权限错误为友好消息，避免透传 axios 默认的
+        // "Request failed with status code 403" 让调用方无从排查
+        const upstreamStatus = err?.response?.status
+        if (upstreamStatus === 401 || upstreamStatus === 403) {
+          const friendly = new Error(
+            `图像生成服务认证失败（HTTP ${upstreamStatus}），请检查 server/.env 的 OPENROUTER_API_KEY：可能已失效/被撤销（泄露的 key 会被 OpenRouter 自动禁用）、账户余额不足或无权访问该模型`,
+          )
+          friendly.status = upstreamStatus
+          friendly.upstreamMessage = err?.response?.data
+          throw friendly
+        }
+        throw err
+      }
     },
   }
 }

@@ -9,14 +9,25 @@ services:
     volumes:
       - mysql-data:/var/lib/mysql
       - ./server/sql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    # 健康检查：用 mysqladmin ping 探测，供 docker compose --wait 判断就绪
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
+      start_period: 8s
 
   backend:
     build:
       context: ./server
     env_file:
       - ./server/.env
+    # 容器内用 docker 网络 DNS 名连 mysql 服务（覆盖 .env 里的 localhost）
+    environment:
+      MYSQL_HOST: mysql
     depends_on:
-      - mysql
+      mysql:
+        condition: service_healthy
     ports:
       - "4398:4398"
     volumes:

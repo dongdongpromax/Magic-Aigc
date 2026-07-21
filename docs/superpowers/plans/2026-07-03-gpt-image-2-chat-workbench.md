@@ -13,6 +13,7 @@
 ### Task 1: 建立测试与配置基线
 
 **Files:**
+
 - Create: `docs/superpowers/plans/2026-07-03-gpt-image-2-chat-workbench.md`
 - Create: `.env.example`
 - Create: `src/config/env.js`
@@ -37,7 +38,7 @@ describe('getDefaultAppConfig', () => {
       VITE_AI_DEFAULT_SIZE: '1024x1024',
       VITE_AI_DEFAULT_QUALITY: 'high',
       VITE_AI_DEFAULT_N: '1',
-      VITE_AI_TIMEOUT: '120000',
+      VITE_AI_TIMEOUT: '1200000',
     })
 
     const { getDefaultAppConfig } = await import('./env')
@@ -49,7 +50,7 @@ describe('getDefaultAppConfig', () => {
       defaultSize: '1024x1024',
       defaultQuality: 'high',
       defaultN: 1,
-      timeout: 120000,
+      timeout: 1200000,
     })
   })
 })
@@ -107,7 +108,7 @@ export function getDefaultAppConfig() {
     defaultSize: env.VITE_AI_DEFAULT_SIZE || '1024x1024',
     defaultQuality: env.VITE_AI_DEFAULT_QUALITY || 'high',
     defaultN: Number(env.VITE_AI_DEFAULT_N || 1),
-    timeout: Number(env.VITE_AI_TIMEOUT || 120000),
+    timeout: Number(env.VITE_AI_TIMEOUT || 1200000),
   }
 }
 ```
@@ -151,7 +152,7 @@ VITE_AI_MODE=openai-image
 VITE_AI_DEFAULT_SIZE=1024x1024
 VITE_AI_DEFAULT_QUALITY=high
 VITE_AI_DEFAULT_N=1
-VITE_AI_TIMEOUT=120000
+VITE_AI_TIMEOUT=1200000
 ```
 
 - [ ] **Step 5: 运行测试确认通过**
@@ -170,6 +171,7 @@ git commit -m "test: add app config and vitest baseline"
 ### Task 2: 重构消息模型、持久化与 Pinia Store
 
 **Files:**
+
 - Create: `src/utils/storage.js`
 - Create: `src/utils/message.js`
 - Create: `src/store/chat.test.js`
@@ -283,16 +285,18 @@ export const useChatStore = defineStore('chat', () => {
   const defaults = getDefaultAppConfig()
   const restored = loadPersistedState()
 
-  const appConfig = reactive(restored?.appConfig || {
-    baseURL: defaults.baseURL,
-    apiKey: defaults.apiKey,
-    defaultModel: defaults.defaultModel,
-    requestMode: defaults.requestMode,
-    defaultSize: defaults.defaultSize,
-    defaultQuality: defaults.defaultQuality,
-    defaultN: defaults.defaultN,
-    timeout: defaults.timeout,
-  })
+  const appConfig = reactive(
+    restored?.appConfig || {
+      baseURL: defaults.baseURL,
+      apiKey: defaults.apiKey,
+      defaultModel: defaults.defaultModel,
+      requestMode: defaults.requestMode,
+      defaultSize: defaults.defaultSize,
+      defaultQuality: defaults.defaultQuality,
+      defaultN: defaults.defaultN,
+      timeout: defaults.timeout,
+    },
+  )
 
   const topics = ref(restored?.topics || [])
   const messages = ref(restored?.messages || [])
@@ -374,6 +378,7 @@ git commit -m "feat: add chat state model and persistence"
 ### Task 3: 实现 AI 客户端与响应归一化
 
 **Files:**
+
 - Create: `src/services/aiClient.js`
 - Create: `src/services/imageSession.js`
 - Create: `src/utils/normalize.js`
@@ -486,6 +491,7 @@ git commit -m "feat: add ai client and image response normalization"
 ### Task 4: 完成设置抽屉与连接状态组件
 
 **Files:**
+
 - Create: `src/components/SettingsDrawer.vue`
 - Create: `src/components/ConnectionBadge.vue`
 - Create: `src/components/ConnectionBadge.test.js`
@@ -607,6 +613,7 @@ git commit -m "feat: add connection badge and settings drawer"
 ### Task 5: 构建消息气泡和图片结果卡片
 
 **Files:**
+
 - Create: `src/components/MessageBubble.vue`
 - Create: `src/components/ImageMessageCard.vue`
 - Create: `src/components/ImageMessageCard.test.js`
@@ -729,6 +736,7 @@ git commit -m "feat: add message bubble and image card actions"
 ### Task 6: 重写输入控制台并接通真实生成流程
 
 **Files:**
+
 - Create: `src/components/InputConsole.test.js`
 - Modify: `src/components/InputConsole.vue`
 - Modify: `src/store/chat.js`
@@ -834,7 +842,10 @@ function completeImageGeneration(result, prompt) {
   const topicId = currentTopicId.value
   const generatingIndex = [...messages.value]
     .reverse()
-    .findIndex((item) => item.topicId === topicId && item.type === 'system_status' && item.status === 'generating')
+    .findIndex(
+      (item) =>
+        item.topicId === topicId && item.type === 'system_status' && item.status === 'generating',
+    )
 
   if (generatingIndex >= 0) {
     messages.value.splice(messages.value.length - 1 - generatingIndex, 1)
@@ -871,7 +882,8 @@ function failImageGeneration(error) {
   const topicId = currentTopicId.value
   const readable = getReadableError(error)
   const lastIndex = messages.value.findLastIndex(
-    (item) => item.topicId === topicId && item.type === 'system_status' && item.status === 'generating',
+    (item) =>
+      item.topicId === topicId && item.type === 'system_status' && item.status === 'generating',
   )
 
   if (lastIndex >= 0) {
@@ -911,6 +923,7 @@ git commit -m "feat: connect input console to live image generation"
 ### Task 7: 打磨侧边栏、空状态与主题行为
 
 **Files:**
+
 - Create: `src/components/Sidebar.test.js`
 - Modify: `src/components/Sidebar.vue`
 - Modify: `src/components/ChatArea.vue`
@@ -996,9 +1009,7 @@ $sidebar-width: 288px;
 ```scss
 // src/styles/main.scss
 body {
-  background:
-    radial-gradient(circle at top, rgba(74, 113, 255, 0.12), transparent 28%),
-    #05070b;
+  background: radial-gradient(circle at top, rgba(74, 113, 255, 0.12), transparent 28%), #05070b;
 }
 ```
 
@@ -1017,6 +1028,7 @@ git commit -m "feat: polish sidebar and empty state experience"
 ### Task 8: 全量验证与交付检查
 
 **Files:**
+
 - Modify: `README.md`
 
 - [ ] **Step 1: 补充 README 的启动与配置说明**
@@ -1054,6 +1066,7 @@ npm run dev
 ```
 
 Expected:
+
 - 首屏未配置时可打开设置抽屉
 - 配置有效后连接状态变为 `已连接`
 - 输入 prompt 可返回真实图片消息

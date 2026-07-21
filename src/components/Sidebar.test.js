@@ -39,7 +39,7 @@ vi.mock('@/services/settingsApi', () => ({
     defaultQuality: 'high',
     defaultN: 1,
     requestMode: 'openrouter-image',
-    timeout: 120000,
+    timeout: 1200000,
   }),
   updateSettings: vi.fn().mockResolvedValue({}),
 }))
@@ -126,9 +126,7 @@ describe('Sidebar', () => {
     // mock window.confirm 返回 true（确认删除）
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
     // mock store.deleteTopic 避免真实 API 调用
-    const deleteTopicSpy = vi
-      .spyOn(store, 'deleteTopic')
-      .mockResolvedValue(undefined)
+    const deleteTopicSpy = vi.spyOn(store, 'deleteTopic').mockResolvedValue(undefined)
 
     const wrapper = mount(Sidebar, {
       global: { plugins: [pinia] },
@@ -166,9 +164,7 @@ describe('Sidebar', () => {
 
     // mock window.confirm 返回 false（取消）
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
-    const deleteTopicSpy = vi
-      .spyOn(store, 'deleteTopic')
-      .mockResolvedValue(undefined)
+    const deleteTopicSpy = vi.spyOn(store, 'deleteTopic').mockResolvedValue(undefined)
 
     const wrapper = mount(Sidebar, {
       global: { plugins: [pinia] },

@@ -16,6 +16,6 @@ export function getDefaultAppConfig() {
     defaultSize: 'auto',
     defaultQuality: 'high',
     defaultN: 1,
-    timeout: Number(env.VITE_BACKEND_TIMEOUT || 120000),
+    timeout: Number(env.VITE_BACKEND_TIMEOUT || 1200000),
   }
 }

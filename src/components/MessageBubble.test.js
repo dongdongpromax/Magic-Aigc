@@ -16,7 +16,7 @@ describe('MessageBubble', () => {
     })
 
     expect(wrapper.get('[data-role="message-row"]').classes()).toContain('is-user')
-    expect(wrapper.get('[data-role="message-badge"]').text()).toBe('你')
+    expect(wrapper.get('.role-tag').text()).toBe('你')
     expect(wrapper.text()).toContain('生成一张冷银色未来大厅')
   })
 
@@ -33,8 +33,8 @@ describe('MessageBubble', () => {
     })
 
     expect(wrapper.get('[data-role="message-row"]').classes()).toContain('is-assistant')
-    expect(wrapper.get('[data-role="message-badge"]').text()).toBe('AI')
-    expect(wrapper.get('[data-role="message-title"]').text()).toBe('图像助手')
+    expect(wrapper.get('.role-tag').text()).toBe('AI')
+    expect(wrapper.get('.role-title').text()).toBe('图像助手')
   })
 
   it('系统状态消息使用紧凑状态条', () => {
@@ -50,7 +50,7 @@ describe('MessageBubble', () => {
     })
 
     expect(wrapper.get('[data-role="message-row"]').classes()).toContain('is-system')
-    expect(wrapper.get('[data-role="message-body"]').classes()).toContain('compact-status')
+    expect(wrapper.get('[data-role="message-body"]').classes()).toContain('status-pill')
     expect(wrapper.text()).toContain('正在生成图像...')
   })
 })
