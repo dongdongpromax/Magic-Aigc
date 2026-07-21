@@ -32,7 +32,8 @@ export function createSettingsRepository(pool) {
         defaultSize: payload.defaultSize || 'auto',
         defaultQuality: payload.defaultQuality || 'high',
         defaultN: payload.defaultN || 1,
-        requestMode: payload.requestMode || 'backend-proxy',
+        // P1-1: 与前端 env.js 默认值和 SettingsDrawer 选项对齐
+        requestMode: payload.requestMode || 'openrouter-image',
         timeout: payload.timeout || 120000,
       }
 

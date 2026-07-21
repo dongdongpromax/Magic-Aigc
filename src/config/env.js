@@ -11,7 +11,8 @@ export function getDefaultAppConfig() {
     baseURL: env.VITE_BACKEND_BASE_URL || 'http://127.0.0.1:4398',
     apiKey: '',
     defaultModel: 'openai/gpt-image-2',
-    requestMode: 'backend-proxy',
+    // P1-1: 与后端 settingsRepository 默认值和 SettingsDrawer 选项对齐
+    requestMode: 'openrouter-image',
     defaultSize: 'auto',
     defaultQuality: 'high',
     defaultN: 1,

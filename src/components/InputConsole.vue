@@ -5,13 +5,15 @@ import { NSelect } from 'naive-ui'
 import { requestImages } from '@/services/imageSession'
 import { uploadReferenceImages } from '@/services/uploadApi'
 import { useChatStore } from '@/store/chat'
+import { MAX_REFERENCE_IMAGES } from '@/utils/constants'
 
 const chatStore = useChatStore()
 const isLoading = ref(false)
 const isExpanded = ref(false)
 const isSizePanelVisible = ref(false)
-const uploadHint = ref('最多上传 16 张参考图')
-const maxReferenceImages = 16
+const uploadHint = ref(`最多上传 ${MAX_REFERENCE_IMAGES} 张参考图`)
+// P1-7: 引用共享常量，避免魔法数字散落
+const maxReferenceImages = MAX_REFERENCE_IMAGES
 
 const models = [{ label: 'GPT Image 2', value: 'openai/gpt-image-2' }]
 

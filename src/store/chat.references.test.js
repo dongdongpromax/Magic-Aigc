@@ -10,6 +10,8 @@ const {
   saveDraftMock,
   getSettingsMock,
   updateSettingsMock,
+  registerReferenceFromMessageMock,
+  deleteReferenceImageMock,
 } = vi.hoisted(() => ({
   listTopicsMock: vi.fn(),
   getMessagesMock: vi.fn(),
@@ -18,6 +20,8 @@ const {
   saveDraftMock: vi.fn(),
   getSettingsMock: vi.fn(),
   updateSettingsMock: vi.fn(),
+  registerReferenceFromMessageMock: vi.fn(),
+  deleteReferenceImageMock: vi.fn(),
 }))
 
 vi.mock('@/services/chatApi', () => ({
@@ -31,6 +35,11 @@ vi.mock('@/services/chatApi', () => ({
 vi.mock('@/services/settingsApi', () => ({
   getSettings: getSettingsMock,
   updateSettings: updateSettingsMock,
+}))
+
+vi.mock('@/services/uploadApi', () => ({
+  registerReferenceFromMessage: registerReferenceFromMessageMock,
+  deleteReferenceImage: deleteReferenceImageMock,
 }))
 
 describe('chat reference images', () => {
@@ -67,10 +76,11 @@ describe('chat reference images', () => {
       defaultSize: 'auto',
       defaultQuality: 'high',
       defaultN: 1,
-      requestMode: 'backend-proxy',
+      requestMode: 'openrouter-image',
       timeout: 120000,
     })
     updateSettingsMock.mockResolvedValue({})
+    deleteReferenceImageMock.mockResolvedValue({ success: true })
   })
 
   it('支持向当前草稿追加多张参考图并删除单张', async () => {
@@ -110,5 +120,87 @@ describe('chat reference images', () => {
 
     expect(saveDraftMock).toHaveBeenCalled()
     expect(localStorage.getItem('ai-chat-draw:chat-store')).toBeNull()
+  })
+
+  it('addReferenceFromMessage 成功时调 API 并更新 currentDraft.referenceImages', async () => {
+    const returnedRefs = [
+      {
+        id: 'ref-new',
+        name: 'test.png',
+        filePath: '/files/generated/test.png',
+        sourceMessageId: 'msg-1',
+      },
+    ]
+    registerReferenceFromMessageMock.mockResolvedValue({ referenceImages: returnedRefs })
+
+    const store = useChatStore()
+    await store.createTopic('测试主题')
+
+    await store.addReferenceFromMessage({
+      id: 'msg-1',
+      images: [{ id: 'img-1', url: '/files/generated/test.png' }],
+    })
+
+    expect(registerReferenceFromMessageMock).toHaveBeenCalledWith('topic-1', {
+      messageId: 'msg-1',
+      imageIds: ['img-1'],
+    })
+    // 前端 referenceImages 应被后端返回值替换
+    expect(store.currentDraft.referenceImages).toEqual(returnedRefs)
+    // lastError 应被清空
+    expect(store.lastError).toBe('')
+  })
+
+  it('addReferenceFromMessage 已达 16 张上限时设 lastError 且不调 API', async () => {
+    const store = useChatStore()
+    await store.createTopic('测试主题')
+
+    // 预填 16 张参考图，达到上限
+    const existing = Array.from({ length: 16 }, (_, i) => ({
+      id: `ref-${i}`,
+      name: `${i}.png`,
+      filePath: `/files/references/${i}.png`,
+      type: 'image/png',
+    }))
+    store.currentDraft.referenceImages = existing
+
+    await store.addReferenceFromMessage({
+      id: 'msg-1',
+      images: [{ id: 'img-1', url: '/files/generated/test.png' }],
+    })
+
+    // 不应调 API
+    expect(registerReferenceFromMessageMock).not.toHaveBeenCalled()
+    // 应设 lastError 提示上限
+    expect(store.lastError).toContain('16')
+  })
+
+  it('addReferenceFromMessage API 失败时设 lastError', async () => {
+    registerReferenceFromMessageMock.mockRejectedValue(new Error('网络错误'))
+
+    const store = useChatStore()
+    await store.createTopic('测试主题')
+
+    await store.addReferenceFromMessage({
+      id: 'msg-1',
+      images: [{ id: 'img-1', url: '/files/generated/test.png' }],
+    })
+
+    expect(store.lastError).toContain('网络错误')
+    // 失败时不应改写 referenceImages
+    expect(store.currentDraft.referenceImages).toEqual([])
+  })
+
+  it('addReferenceFromMessage 消息无图片时设 lastError 提示无可设参考图', async () => {
+    const store = useChatStore()
+    await store.createTopic('测试主题')
+
+    await store.addReferenceFromMessage({
+      id: 'msg-1',
+      images: [],
+    })
+
+    expect(registerReferenceFromMessageMock).not.toHaveBeenCalled()
+    expect(store.lastError).toContain('没有可设为参考图')
   })
 })

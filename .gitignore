@@ -14,6 +14,11 @@ dist-ssr
 coverage
 *.local
 
+# 环境变量文件（含密钥，禁止入库）
+.env
+server/.env
+server/.env.local
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

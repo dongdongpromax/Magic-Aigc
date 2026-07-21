@@ -50,4 +50,65 @@ describe('triggerBrowserDownload', () => {
     expect(anchor._download).toBe('test.png')
     expect(click).toHaveBeenCalled()
   })
+
+  it('相对路径（/files/...）拼接后端 baseURL', async () => {
+    const { backendClient } = await import('@/services/backendClient')
+    // 模拟后端 baseURL
+    Object.defineProperty(backendClient.defaults, 'baseURL', {
+      value: 'http://127.0.0.1:4398',
+      configurable: true,
+    })
+
+    const anchor = {
+      click: vi.fn(),
+      remove: vi.fn(),
+      set href(value) {
+        this._href = value
+      },
+      set download(value) {
+        this._download = value
+      },
+    }
+
+    vi.spyOn(document, 'createElement').mockReturnValue(anchor)
+    vi.spyOn(document.body, 'appendChild').mockImplementation(() => anchor)
+
+    triggerBrowserDownload({
+      dataUrl: '/files/generated/test.png',
+      fileName: 'test.png',
+    })
+
+    // 相对路径应拼接 baseURL
+    expect(anchor._href).toBe('http://127.0.0.1:4398/files/generated/test.png')
+  })
+
+  it('data URL 原样使用不拼接 baseURL', async () => {
+    const { backendClient } = await import('@/services/backendClient')
+    Object.defineProperty(backendClient.defaults, 'baseURL', {
+      value: 'http://127.0.0.1:4398',
+      configurable: true,
+    })
+
+    const anchor = {
+      click: vi.fn(),
+      remove: vi.fn(),
+      set href(value) {
+        this._href = value
+      },
+      set download(value) {
+        this._download = value
+      },
+    }
+
+    vi.spyOn(document, 'createElement').mockReturnValue(anchor)
+    vi.spyOn(document.body, 'appendChild').mockImplementation(() => anchor)
+
+    triggerBrowserDownload({
+      dataUrl: 'data:image/png;base64,ZmFrZQ==',
+      fileName: 'test.png',
+    })
+
+    // data URL 不应拼接 baseURL
+    expect(anchor._href).toBe('data:image/png;base64,ZmFrZQ==')
+  })
 })

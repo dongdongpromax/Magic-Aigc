@@ -1,3 +1,14 @@
+/**
+ * chat store 图片生成预览/持久化测试
+ *
+ * P1-4 改造后：completeImageGeneration 不再调用 localImageBridge.saveImageToProject，
+ * 而是直接使用后端 generateImageMessage 返回的 localPath/savedToProject。
+ * 本测试覆盖：
+ *   1. 后端已保存（返回 localPath）→ 触发浏览器下载 + 使用后端 localPath + 不调桥接
+ *   2. 后端未保存（仅 data URL）→ 保留图片消息但 savedToProject = false
+ *   3. 图片消息不写入 localStorage（前端只存内存）
+ *   4. 后端已保存的图片不会再次调用本地桥接写盘
+ */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useChatStore } from './chat'
@@ -69,13 +80,13 @@ describe('chat preview persistence', () => {
       defaultSize: 'auto',
       defaultQuality: 'high',
       defaultN: 1,
-      requestMode: 'backend-proxy',
+      requestMode: 'openrouter-image',
       timeout: 120000,
     })
     updateSettingsMock.mockResolvedValue({})
   })
 
-  it('生成成功后先触发浏览器下载，再尝试写入项目目录', async () => {
+  it('生成成功后触发浏览器下载，并使用后端返回的 localPath', async () => {
     const store = useChatStore()
     const topicId = await store.createTopic('测试主题')
     const draft = store.drafts[topicId]
@@ -88,6 +99,7 @@ describe('chat preview persistence', () => {
 
     vi.spyOn(downloadModule, 'buildTimestamp').mockReturnValue('20260703-224500')
     vi.spyOn(downloadModule, 'triggerBrowserDownload').mockImplementation(() => {})
+    // P1-4: 桥接不再被调用，spy 仅用于断言「未调用」
     vi.spyOn(bridgeModule, 'saveImageToProject').mockResolvedValue({
       success: true,
       relativePath: '/generated/test.png',
@@ -95,39 +107,55 @@ describe('chat preview persistence', () => {
 
     await store.completeImageGeneration(
       {
-        images: [{ id: 'img-1', url: 'data:image/png;base64,ZmFrZQ==', b64: 'ZmFrZQ==' }],
+        // 后端返回 localPath + savedToProject，前端直接使用
+        images: [
+          {
+            id: 'img-1',
+            url: '/files/generated/test.png',
+            localPath: '/files/generated/test.png',
+            savedToProject: true,
+          },
+        ],
       },
       '赛博山脉',
     )
 
     expect(downloadModule.triggerBrowserDownload).toHaveBeenCalled()
-    expect(bridgeModule.saveImageToProject).toHaveBeenCalled()
+    // P1-4: 桥接不应被调用
+    expect(bridgeModule.saveImageToProject).not.toHaveBeenCalled()
     expect(store.currentMessages.at(-1).images[0]).toMatchObject({
-      localPath: '/generated/test.png',
+      localPath: '/files/generated/test.png',
       savedToProject: true,
     })
   })
 
-  it('本地桥接失败时仍然保留图片消息', async () => {
+  it('后端未保存时仍保留图片消息且 savedToProject 为 false', async () => {
     const store = useChatStore()
     const topicId = await store.createTopic('测试主题')
     store.currentTopicId = topicId
 
     vi.spyOn(downloadModule, 'buildTimestamp').mockReturnValue('20260703-224500')
     vi.spyOn(downloadModule, 'triggerBrowserDownload').mockImplementation(() => {})
-    vi.spyOn(bridgeModule, 'saveImageToProject').mockRejectedValue(new Error('bridge error'))
+    vi.spyOn(bridgeModule, 'saveImageToProject').mockResolvedValue({
+      success: true,
+      relativePath: '/generated/test.png',
+    })
 
     await store.completeImageGeneration(
       {
+        // 后端仅返回 data URL，无 localPath
         images: [{ id: 'img-1', url: 'data:image/png;base64,ZmFrZQ==', b64: 'ZmFrZQ==' }],
       },
       '赛博山脉',
     )
 
+    // P1-4: 无 localPath 时 localPath 为空、savedToProject 为 false
     expect(store.currentMessages.at(-1).images[0]).toMatchObject({
       localPath: '',
       savedToProject: false,
     })
+    // 桥接不应被调用
+    expect(bridgeModule.saveImageToProject).not.toHaveBeenCalled()
   })
 
   it('图片消息仅保留内存状态，不再写入 localStorage', async () => {
@@ -137,14 +165,17 @@ describe('chat preview persistence', () => {
 
     vi.spyOn(downloadModule, 'buildTimestamp').mockReturnValue('20260703-224500')
     vi.spyOn(downloadModule, 'triggerBrowserDownload').mockImplementation(() => {})
-    vi.spyOn(bridgeModule, 'saveImageToProject').mockResolvedValue({
-      success: true,
-      relativePath: '/generated/test.png',
-    })
 
     await store.completeImageGeneration(
       {
-        images: [{ id: 'img-1', url: 'data:image/png;base64,ZmFrZQ==', b64: 'ZmFrZQ==' }],
+        images: [
+          {
+            id: 'img-1',
+            url: '/files/generated/test.png',
+            localPath: '/files/generated/test.png',
+            savedToProject: true,
+          },
+        ],
       },
       '赛博山脉',
     )

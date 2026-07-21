@@ -13,7 +13,8 @@ describe('getDefaultAppConfig', () => {
       baseURL: 'http://127.0.0.1:5500',
       apiKey: '',
       defaultModel: 'openai/gpt-image-2',
-      requestMode: 'backend-proxy',
+      // P1-1: 与后端 settingsRepository 默认值对齐
+      requestMode: 'openrouter-image',
       defaultSize: 'auto',
       defaultQuality: 'high',
       defaultN: 1,
@@ -29,7 +30,8 @@ describe('getDefaultAppConfig', () => {
     expect(getDefaultAppConfig()).toMatchObject({
       baseURL: 'http://127.0.0.1:4398',
       defaultModel: 'openai/gpt-image-2',
-      requestMode: 'backend-proxy',
+      // P1-1: 与后端 settingsRepository 默认值对齐
+      requestMode: 'openrouter-image',
       defaultSize: 'auto',
     })
   })

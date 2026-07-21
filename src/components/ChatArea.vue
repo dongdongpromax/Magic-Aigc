@@ -14,17 +14,26 @@ const currentMessages = computed(() => {
   return chatStore.currentMessages
 })
 
-const handleRefine = (message) => {
-  chatStore.currentDraft.referenceImages = message.images.map((image) => ({
-    id: image.id,
-    name: image.localPath?.split('/').pop() || `reference-${image.id}.png`,
-    type: 'image/png',
-    url: image.url,
-    dataUrl: image.url?.startsWith('data:') ? image.url : '',
-    sourceMessageId: message.id,
-  }))
+/**
+ * P0-7: 「继续细化」——把消息的图片设为参考图，并把 prompt 设为该消息的 prompt
+ *
+ * 参考图通过 chatStore.addReferenceFromMessage 持久化到后端 draft_reference_images 表，
+ * 不再直接修改本地状态导致刷新丢失。
+ *
+ * @param {{ id: string; prompt?: string; images?: Array<object> }} message 历史消息
+ */
+const handleRefine = async (message) => {
+  // 先把 prompt 回填到草稿（细化的起点）
+  if (message.prompt) {
+    chatStore.currentDraft.prompt = message.prompt
+  }
+  // 参考图走后端持久化
+  await chatStore.addReferenceFromMessage(message)
 }
 
+/**
+ * 「再次生成」——把消息的参数回填到草稿，用户可调整后重新生成
+ */
 const handleRetry = (message) => {
   const draft = chatStore.currentDraft
   draft.prompt = message.prompt || ''
@@ -34,10 +43,16 @@ const handleRetry = (message) => {
   draft.n = message.n || draft.n
 }
 
+/**
+ * P0-7: 「设为参考图」——调 store action 持久化到后端
+ */
 const handleReference = (message) => {
-  handleRefine(message)
+  chatStore.addReferenceFromMessage(message)
 }
 
+/**
+ * 下载原图
+ */
 const handleDownload = async (message) => {
   const image = message.images?.[0]
   if (!image?.url) return

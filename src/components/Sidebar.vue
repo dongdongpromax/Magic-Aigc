@@ -1,10 +1,12 @@
 <script setup>
 import { computed, ref } from 'vue'
 import { useChatStore } from '@/store/chat'
-import { Plus, Search, Image as ImageIcon } from 'lucide-vue-next'
+import { Plus, Search, Image as ImageIcon, Trash2 } from 'lucide-vue-next'
 
 const chatStore = useChatStore()
 const keyword = ref('')
+// 正在删除的主题 ID，用于禁用对应按钮防重复点击
+const deletingTopicId = ref('')
 
 const filteredTopics = computed(() => {
   const search = keyword.value.trim().toLowerCase()
@@ -19,6 +21,40 @@ const handleNewTopic = () => {
 
 const handleSelectTopic = (topicId) => {
   chatStore.selectTopic(topicId)
+}
+
+/**
+ * P0-8: 删除主题
+ *
+ * 用原生 confirm 弹窗防误删（避免引入 NDialogProvider 的额外依赖）。
+ * 调用 chatStore.deleteTopic，后端会事务级联清理 5 表 + 文件。
+ *
+ * @param {Event} event 点击事件（用于 stopPropagation 防止触发选中）
+ * @param {string} topicId 主题 ID
+ */
+const handleDeleteTopic = async (event, topicId) => {
+  // 阻止冒泡，避免触发 topic-item 的 selectTopic
+  event?.stopPropagation()
+
+  const topic = chatStore.topics.find((t) => t.id === topicId)
+  const title = topic?.title || '该主题'
+  // 原生确认框，防止误删；未来可升级为 NDialog
+  if (!window.confirm(`确定删除「${title}」吗？该操作会清除其所有消息和文件，且不可恢复。`)) {
+    return
+  }
+
+  // 防重复点击
+  if (deletingTopicId.value) return
+  deletingTopicId.value = topicId
+
+  try {
+    await chatStore.deleteTopic(topicId)
+  } catch (err) {
+    // 删除失败时通过 store 的 lastError 显示
+    chatStore.lastError = `删除主题失败：${err?.message || ''}`
+  } finally {
+    deletingTopicId.value = ''
+  }
 }
 </script>
 
@@ -66,6 +102,17 @@ const handleSelectTopic = (topicId) => {
             topic.status === 'generating' ? '生成中' : topic.status === 'error' ? '异常' : '就绪'
           }}</span>
         </div>
+        <!-- P0-8: 删除按钮，hover 时显示，删除中禁用 -->
+        <button
+          class="topic-delete"
+          type="button"
+          data-action="delete-topic"
+          :disabled="deletingTopicId === topic.id"
+          :title="deletingTopicId === topic.id ? '删除中...' : '删除主题'"
+          @click="handleDeleteTopic($event, topic.id)"
+        >
+          <Trash2 :size="14" />
+        </button>
       </button>
     </div>
   </div>
@@ -207,6 +254,10 @@ const handleSelectTopic = (topicId) => {
 
   &:hover {
     background-color: rgba(255, 255, 255, 0.03);
+
+    .topic-delete {
+      opacity: 1;
+    }
   }
 
   &.active {
@@ -238,6 +289,7 @@ const handleSelectTopic = (topicId) => {
   flex-direction: column;
   gap: 4px;
   min-width: 0;
+  flex: 1;
 }
 
 .topic-title {
@@ -251,5 +303,40 @@ const handleSelectTopic = (topicId) => {
 .topic-status {
   font-size: 11px;
   color: $text-secondary;
+}
+
+.topic-delete {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  color: $text-secondary;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  // 默认隐藏，hover topic-item 时显示
+  opacity: 0;
+  transition: all 0.2s ease;
+
+  &:hover:not(:disabled) {
+    color: #ff6b6b;
+    border-color: rgba(255, 107, 107, 0.4);
+    background: rgba(255, 107, 107, 0.12);
+  }
+
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+}
+
+@media (max-width: 860px) {
+  .topic-delete {
+    // 移动端常驻显示，因为无 hover
+    opacity: 1;
+  }
 }
 </style>
