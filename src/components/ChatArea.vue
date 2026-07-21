@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useChatStore } from '@/store/chat'
 import { triggerBrowserDownload } from '@/utils/download'
 import ConnectionBadge from './ConnectionBadge.vue'
@@ -47,6 +47,10 @@ const handleDownload = async (message) => {
     fileName: `${chatStore.currentTopicId || 'image'}-${Date.now()}.png`,
   })
 }
+
+onMounted(() => {
+  chatStore.bootstrap()
+})
 </script>
 
 <template>

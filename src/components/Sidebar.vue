@@ -16,6 +16,10 @@ const filteredTopics = computed(() => {
 const handleNewTopic = () => {
   chatStore.createTopic('新建创作')
 }
+
+const handleSelectTopic = (topicId) => {
+  chatStore.selectTopic(topicId)
+}
 </script>
 
 <template>
@@ -50,7 +54,7 @@ const handleNewTopic = () => {
         class="topic-item"
         :class="{ active: topic.id === chatStore.currentTopicId }"
         type="button"
-        @click="chatStore.currentTopicId = topic.id"
+        @click="handleSelectTopic(topic.id)"
       >
         <img v-if="topic.coverImage" :src="topic.coverImage" alt="thumbnail" class="topic-thumb" />
         <div v-else class="topic-thumb-placeholder">

@@ -11,6 +11,10 @@ export default defineConfig({
   },
   server: {
     port: 2222,
+    proxy: {
+      '/api': 'http://127.0.0.1:4398',
+      '/files': 'http://127.0.0.1:4398',
+    },
   },
   test: {
     environment: 'jsdom',

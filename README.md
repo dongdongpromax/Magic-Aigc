@@ -1,48 +1,64 @@
 # ai-chat-draw
 
-一个基于 Vue 3、Pinia、Naive UI 和 OpenAI 兼容中转站的 GPT Image-2 对话式图像工作台。
+一个基于 Vue 3、Node.js、MySQL、Docker Compose 和 Naive UI 的 GPT Image-2 对话式图像工作台。
 
 ## 启动方式
 
-1. 复制 `.env.example` 为 `.env.local`
-2. 填写中转站 `baseURL` 和 `apiKey`
-3. 安装依赖
-4. 启动开发环境
+1. 安装前端依赖与后端依赖
+2. 复制前端和后端环境变量
+3. 启动 Docker Compose 中的 `mysql` 和 `backend`
+4. 启动前端开发服务器
 
 ```bash
 cp .env.example .env.local
+cp server/.env.example server/.env
 npm install
+cd server && npm install && cd ..
+docker compose up -d mysql backend
 npm run dev
 ```
 
 ## 默认环境变量
 
+前端 `.env.local`
+
 ```bash
-VITE_OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
-VITE_OPENROUTER_API_KEY=REMOVED_SECRET-...
-VITE_OPENROUTER_MODEL=openai/gpt-image-2
-VITE_OPENROUTER_MODE=openrouter-image
-VITE_OPENROUTER_DEFAULT_SIZE=1024x1024
-VITE_OPENROUTER_DEFAULT_QUALITY=high
-VITE_OPENROUTER_DEFAULT_N=1
-VITE_OPENROUTER_TIMEOUT=120000
+VITE_BACKEND_BASE_URL=http://127.0.0.1:4398
+VITE_BACKEND_TIMEOUT=120000
+```
+
+后端 `server/.env`
+
+```bash
+PORT=4398
+MYSQL_HOST=mysql
+MYSQL_PORT=3306
+MYSQL_DATABASE=ai_chat_draw
+MYSQL_USER=root
+MYSQL_PASSWORD=root
+OPENROUTER_API_KEY=replace_me
+OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
 ```
 
 ## 测试
 
 ```bash
 npm run test
+cd server && npm run test
 ```
 
-## 图片自动保存
+## 记忆存储
 
-1. 启动前端：`npm run dev`
-2. 启动本地写盘桥接：`node scripts/image-bridge.mjs`
-3. 生成图片后，系统会：
-   - 自动下载到浏览器默认下载目录
-   - 尝试写入 `public/generated/`
+- 聊天主题、消息、草稿和连接配置不再写入 `localStorage`
+- 当前会话记忆统一存入 Docker 中的 MySQL
+- 前端仅保留弹层显隐、加载态等轻量 UI 状态
 
-如果桥接服务未启动，图片仍会正常显示和下载，但不会写入项目目录。
+## 图片文件
+
+- 参考图上传后写入 `server/storage/references/`
+- 生成图由后端统一落到 `server/storage/generated/`
+- 数据库只保存图片元数据和文件路径，不直接存二进制
+- 生成结果仍会触发浏览器下载
 
 ## 图生图参考图
 

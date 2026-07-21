@@ -1,5 +1,5 @@
 import { mount } from '@vue/test-utils'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import Sidebar from './Sidebar.vue'
 import { useChatStore } from '@/store/chat'
@@ -24,9 +24,9 @@ describe('Sidebar', () => {
     expect(wrapper.text()).toContain('新建创作')
 
     const store = useChatStore()
-    const beforeCount = store.topics.length
+    const createTopicSpy = vi.spyOn(store, 'createTopic').mockResolvedValue('topic-1')
 
     await wrapper.find('.action-btn').trigger('click')
-    expect(store.topics.length).toBe(beforeCount + 1)
+    expect(createTopicSpy).toHaveBeenCalledWith('新建创作')
   })
 })

@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Expand, Image as ImageIcon, Minimize, Send, Settings2, Sparkles } from 'lucide-vue-next'
 import { NSelect } from 'naive-ui'
 import { requestImages } from '@/services/imageSession'
+import { uploadReferenceImages } from '@/services/uploadApi'
 import { useChatStore } from '@/store/chat'
 
 const chatStore = useChatStore()
@@ -47,21 +48,6 @@ function selectSize(value) {
   isSizePanelVisible.value = false
 }
 
-function createReferenceId() {
-  return (
-    globalThis.crypto?.randomUUID?.() || `ref-${Date.now()}-${Math.random().toString(16).slice(2)}`
-  )
-}
-
-function fileToDataUrl(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(String(reader.result || ''))
-    reader.onerror = () => reject(reader.error || new Error('参考图读取失败'))
-    reader.readAsDataURL(file)
-  })
-}
-
 async function handleReferenceUpload(event) {
   const files = Array.from(event.target?.files || [])
 
@@ -83,23 +69,24 @@ async function handleReferenceUpload(event) {
   }
 
   const acceptedFiles = files.slice(0, remain)
-  const parsedFiles = await Promise.all(
-    acceptedFiles.map(async (file) => ({
-      id: createReferenceId(),
-      name: file.name,
-      type: file.type,
-      url: URL.createObjectURL(file),
-      dataUrl: await fileToDataUrl(file),
-      sourceMessageId: null,
-    })),
-  )
+  const topicId = chatStore.currentTopicId || (await chatStore.createTopic('新建创作'))
+  const uploadedFiles = await uploadReferenceImages(topicId, acceptedFiles)
+  const parsedFiles = uploadedFiles.map((item) => ({
+    id: item.id,
+    name: item.name,
+    type: item.mimeType || item.type || 'image/png',
+    url: item.filePath || item.url,
+    filePath: item.filePath || item.url,
+    dataUrl: '',
+    sourceMessageId: item.sourceMessageId || null,
+  }))
 
   chatStore.addReferenceImages(parsedFiles)
   event.target.value = ''
 }
 
-function removeReferenceImage(id) {
-  chatStore.removeReferenceImage(id)
+async function removeReferenceImage(id) {
+  await chatStore.removeReferenceImage(id)
   uploadHint.value = `最多上传 ${maxReferenceImages} 张参考图`
 }
 
@@ -136,10 +123,13 @@ async function handleSend() {
 
   const prompt = draft.value.prompt.trim()
   isLoading.value = true
-  chatStore.addUserPrompt(prompt)
 
   try {
-    const result = await requestImages(chatStore.runtimeConfig, { ...draft.value }, prompt)
+    const topicId = await chatStore.addUserPrompt(prompt)
+    const result = await requestImages(topicId, {
+      prompt,
+      draft: { ...draft.value },
+    })
     await chatStore.completeImageGeneration(result, prompt)
   } catch (error) {
     chatStore.failImageGeneration(error)

@@ -1,39 +1,40 @@
 import { defineStore } from 'pinia'
 import { computed, reactive, ref, watch } from 'vue'
 import { getDefaultAppConfig } from '@/config/env'
+import {
+  createTopic as createRemoteTopic,
+  getDraft as getRemoteDraft,
+  getMessages as getRemoteMessages,
+  listTopics,
+  saveDraft as saveRemoteDraft,
+} from '@/services/chatApi'
+import { getSettings, updateSettings } from '@/services/settingsApi'
+import { deleteReferenceImage as deleteRemoteReferenceImage } from '@/services/uploadApi'
 import { saveImageToProject } from '@/services/localImageBridge'
 import { buildImageFileName, buildTimestamp, triggerBrowserDownload } from '@/utils/download'
 import { createStatusMessage, createUserPromptMessage } from '@/utils/message'
-import { loadPersistedState, savePersistedState } from '@/utils/storage'
 
 export const useChatStore = defineStore('chat', () => {
   const defaults = getDefaultAppConfig()
-  const restored = loadPersistedState()
-  const restoredAppConfig = restored?.appConfig || {}
-  const normalizedDefaultSize =
-    restoredAppConfig.defaultSize && restoredAppConfig.defaultSize !== '1024x1024'
-      ? restoredAppConfig.defaultSize
-      : defaults.defaultSize
 
   const appConfig = reactive({
     baseURL: defaults.baseURL,
     apiKey: defaults.apiKey,
     defaultModel: defaults.defaultModel,
     requestMode: defaults.requestMode,
-    defaultSize: normalizedDefaultSize,
+    defaultSize: defaults.defaultSize,
     defaultQuality: defaults.defaultQuality,
     defaultN: defaults.defaultN,
     timeout: defaults.timeout,
-    ...restoredAppConfig,
-    defaultSize: normalizedDefaultSize,
   })
 
-  const topics = ref(restored?.topics || [])
-  const currentTopicId = ref(restored?.currentTopicId || '')
-  const messages = ref(restored?.messages || [])
-  const drafts = reactive(restored?.drafts || {})
+  const topics = ref([])
+  const currentTopicId = ref('')
+  const messages = ref([])
+  const drafts = reactive({})
   const settingsVisible = ref(false)
   const lastError = ref('')
+  const isBootstrapping = ref(false)
   const preview = reactive({
     visible: false,
     title: '',
@@ -42,6 +43,16 @@ export const useChatStore = defineStore('chat', () => {
     images: [],
     activeIndex: 0,
   })
+  const transientDraft = reactive({
+    prompt: '',
+    model: appConfig.defaultModel,
+    size: appConfig.defaultSize,
+    quality: appConfig.defaultQuality,
+    n: appConfig.defaultN,
+    referenceImages: [],
+  })
+  const draftTimers = new Map()
+  let settingsTimer = null
 
   function createId() {
     return (
@@ -50,6 +61,8 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function ensureDraft(topicId) {
+    if (!topicId) return transientDraft
+
     drafts[topicId] ||= {
       prompt: '',
       model: appConfig.defaultModel,
@@ -68,8 +81,11 @@ export const useChatStore = defineStore('chat', () => {
 
   const currentDraft = computed(() => {
     if (!currentTopicId.value) {
-      const id = createTopic()
-      return ensureDraft(id)
+      transientDraft.model = appConfig.defaultModel
+      transientDraft.size = appConfig.defaultSize
+      transientDraft.quality = appConfig.defaultQuality
+      transientDraft.n = appConfig.defaultN
+      return transientDraft
     }
 
     return ensureDraft(currentTopicId.value)
@@ -81,12 +97,11 @@ export const useChatStore = defineStore('chat', () => {
 
   const runtimeConfig = computed(() => ({
     baseURL: appConfig.baseURL,
-    apiKey: appConfig.apiKey,
     timeout: appConfig.timeout,
     requestMode: appConfig.requestMode,
   }))
 
-  const hasConfig = computed(() => Boolean(appConfig.baseURL && appConfig.apiKey))
+  const hasConfig = computed(() => Boolean(appConfig.baseURL))
 
   const config = computed({
     get: () => currentDraft.value,
@@ -96,22 +111,46 @@ export const useChatStore = defineStore('chat', () => {
     },
   })
 
-  function createTopic(title = '新主题') {
-    const id = createId()
-    const newTopic = {
-      id,
-      title,
-      coverImage: null,
-      lastPrompt: '',
-      updatedAt: Date.now(),
-      messageCount: 0,
-      status: 'idle',
-    }
+  async function bootstrap() {
+    if (isBootstrapping.value) return
 
-    topics.value.unshift(newTopic)
-    currentTopicId.value = id
-    ensureDraft(id)
-    return id
+    isBootstrapping.value = true
+
+    try {
+      Object.assign(appConfig, defaults, await getSettings())
+      topics.value = await listTopics()
+
+      if (topics.value.length) {
+        await selectTopic(topics.value[0].id)
+      } else {
+        await createTopic('新建创作')
+      }
+    } finally {
+      isBootstrapping.value = false
+    }
+  }
+
+  async function selectTopic(topicId) {
+    currentTopicId.value = topicId
+    const [nextMessages, nextDraft] = await Promise.all([
+      getRemoteMessages(topicId),
+      getRemoteDraft(topicId),
+    ])
+
+    messages.value = [
+      ...messages.value.filter((message) => message.topicId !== topicId),
+      ...nextMessages,
+    ]
+    drafts[topicId] = nextDraft
+    return topicId
+  }
+
+  async function createTopic(title = '新主题') {
+    const topic = await createRemoteTopic(title)
+    topics.value.unshift(topic)
+    drafts[topic.id] = await getRemoteDraft(topic.id)
+    currentTopicId.value = topic.id
+    return topic.id
   }
 
   function addMessage(msg) {
@@ -122,8 +161,8 @@ export const useChatStore = defineStore('chat', () => {
     })
   }
 
-  function addUserPrompt(prompt) {
-    const topicId = currentTopicId.value || createTopic()
+  async function addUserPrompt(prompt) {
+    const topicId = currentTopicId.value || (await createTopic('新建创作'))
     const draft = ensureDraft(topicId)
 
     messages.value.push(createUserPromptMessage(topicId, prompt, draft))
@@ -137,16 +176,63 @@ export const useChatStore = defineStore('chat', () => {
       topic.messageCount = messages.value.filter((message) => message.topicId === topicId).length
       topic.status = 'generating'
     }
+
+    scheduleDraftPersist(topicId)
+    return topicId
   }
 
   function addReferenceImages(items) {
     currentDraft.value.referenceImages = [...(currentDraft.value.referenceImages || []), ...items]
+    scheduleDraftPersist(currentTopicId.value)
   }
 
-  function removeReferenceImage(id) {
+  async function removeReferenceImage(id) {
+    const removed = (currentDraft.value.referenceImages || []).find((item) => item.id === id)
+
     currentDraft.value.referenceImages = (currentDraft.value.referenceImages || []).filter(
       (item) => item.id !== id,
     )
+
+    if (currentTopicId.value && removed?.filePath) {
+      await deleteRemoteReferenceImage(currentTopicId.value, id)
+    }
+
+    scheduleDraftPersist(currentTopicId.value)
+  }
+
+  function serializeDraft(draft) {
+    return {
+      prompt: draft.prompt || '',
+      model: draft.model || appConfig.defaultModel,
+      size: draft.size || appConfig.defaultSize,
+      quality: draft.quality || appConfig.defaultQuality,
+      n: draft.n || appConfig.defaultN,
+    }
+  }
+
+  function scheduleDraftPersist(topicId) {
+    if (!topicId) return
+
+    clearTimeout(draftTimers.get(topicId))
+    const timer = setTimeout(() => {
+      saveRemoteDraft(topicId, serializeDraft(ensureDraft(topicId))).catch(() => {})
+    }, 250)
+    draftTimers.set(topicId, timer)
+  }
+
+  function scheduleSettingsPersist() {
+    clearTimeout(settingsTimer)
+    settingsTimer = setTimeout(() => {
+      updateSettings({
+        baseURL: appConfig.baseURL,
+        defaultModel: appConfig.defaultModel,
+        defaultSize: appConfig.defaultSize,
+        defaultQuality: appConfig.defaultQuality,
+        defaultN: appConfig.defaultN,
+        requestMode: appConfig.requestMode,
+        timeout: appConfig.timeout,
+      }).catch(() => {})
+    }, 250)
   }
 
   async function completeImageGeneration(result, prompt) {
@@ -174,6 +260,22 @@ export const useChatStore = defineStore('chat', () => {
           dataUrl: image.url,
           fileName,
         })
+
+        if (image.savedToProject || image.localPath) {
+          return {
+            ...image,
+            localPath: image.localPath || image.url,
+            savedToProject: image.savedToProject ?? true,
+          }
+        }
+
+        if (!image.url?.startsWith('data:')) {
+          return {
+            ...image,
+            localPath: image.localPath || '',
+            savedToProject: Boolean(image.savedToProject),
+          }
+        }
 
         try {
           const saved = await saveImageToProject({
@@ -225,6 +327,7 @@ export const useChatStore = defineStore('chat', () => {
     draft.prompt = ''
     draft.referenceImages = []
     lastError.value = ''
+    scheduleDraftPersist(topicId)
   }
 
   function failImageGeneration(error) {
@@ -296,16 +399,26 @@ export const useChatStore = defineStore('chat', () => {
 
   watch(
     () => ({
-      appConfig: { ...appConfig },
-      topics: topics.value,
-      messages: messages.value,
-      drafts: JSON.parse(JSON.stringify(drafts)),
-      currentTopicId: currentTopicId.value,
+      baseURL: appConfig.baseURL,
+      defaultModel: appConfig.defaultModel,
+      defaultSize: appConfig.defaultSize,
+      defaultQuality: appConfig.defaultQuality,
+      defaultN: appConfig.defaultN,
+      requestMode: appConfig.requestMode,
+      timeout: appConfig.timeout,
     }),
-    (payload) => {
-      savePersistedState(payload)
+    () => {
+      scheduleSettingsPersist()
     },
-    { deep: true, flush: 'sync' },
+    { deep: true },
+  )
+
+  watch(
+    () => (currentTopicId.value ? serializeDraft(ensureDraft(currentTopicId.value)) : null),
+    () => {
+      scheduleDraftPersist(currentTopicId.value)
+    },
+    { deep: true },
   )
 
   return {
@@ -319,10 +432,13 @@ export const useChatStore = defineStore('chat', () => {
     preview,
     settingsVisible,
     lastError,
+    isBootstrapping,
     runtimeConfig,
     hasConfig,
     config,
     ensureDraft,
+    bootstrap,
+    selectTopic,
     createTopic,
     addMessage,
     addUserPrompt,

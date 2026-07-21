@@ -8,7 +8,9 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "server:dev": "cd server && npm run dev",
+    "server:test": "cd server && npm run test"
   },
   "dependencies": {
     "axios": "^1.6.8",

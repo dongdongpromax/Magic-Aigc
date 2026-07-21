@@ -1,0 +1,26 @@
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: ai_chat_draw
+      MYSQL_ROOT_PASSWORD: root
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./server/sql/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+
+  backend:
+    build:
+      context: ./server
+    env_file:
+      - ./server/.env
+    depends_on:
+      - mysql
+    ports:
+      - "4398:4398"
+    volumes:
+      - ./server/storage:/app/storage
+
+volumes:
+  mysql-data:

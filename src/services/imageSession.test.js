@@ -1,95 +1,51 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { normalizeImageResponse } from '@/utils/normalize'
 import { requestImages } from './imageSession'
-import * as aiClientModule from './aiClient'
+import { backendClient } from './backendClient'
 
 describe('requestImages', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
   })
 
-  it('使用 OpenRouter images 端点和 openai/gpt-image-2 模型', async () => {
-    const post = vi.fn().mockResolvedValue({
+  it('把图片生成请求转发到本地 backend', async () => {
+    const post = vi.spyOn(backendClient, 'post').mockResolvedValue({
       data: {
-        data: [{ b64_json: 'ZmFrZQ==' }],
+        images: [{ url: '/files/generated/demo.png' }],
       },
     })
 
-    vi.spyOn(aiClientModule, 'createAiClient').mockReturnValue({ post })
-
-    await requestImages(
-      {
-        baseURL: 'https://openrouter.ai/api/v1',
-        apiKey: 'REMOVED_SECRET-demo',
-        timeout: 120000,
-        requestMode: 'openrouter-image',
-      },
-      {
+    const payload = {
+      prompt: 'A serene mountain landscape',
+      draft: {
         model: 'openai/gpt-image-2',
         size: '1024x1024',
         quality: 'high',
         n: 1,
         referenceImages: [{ url: 'https://img.example.com/ref.png' }],
       },
-      'A serene mountain landscape',
-    )
+    }
 
-    expect(post).toHaveBeenCalledWith('/images', {
-      model: 'openai/gpt-image-2',
-      prompt: 'A serene mountain landscape',
-      size: '1024x1024',
-      quality: 'high',
-      n: 1,
-      input_references: ['https://img.example.com/ref.png'],
-    })
+    await requestImages('topic-1', payload)
+
+    expect(post).toHaveBeenCalledWith('/api/topics/topic-1/messages/image', payload)
   })
 
-  it('优先把参考图映射为 dataUrl，再回退 url', async () => {
-    const post = vi.fn().mockResolvedValue({
+  it('返回 backend 透传的生成结果', async () => {
+    vi.spyOn(backendClient, 'post').mockResolvedValue({
       data: {
-        data: [{ b64_json: 'ZmFrZQ==' }],
+        images: [{ url: '/files/generated/refined.png' }],
       },
     })
 
-    vi.spyOn(aiClientModule, 'createAiClient').mockReturnValue({ post })
-
-    await requestImages(
-      {
-        baseURL: 'https://openrouter.ai/api/v1',
-        apiKey: 'REMOVED_SECRET-demo',
-        timeout: 120000,
-        requestMode: 'openrouter-image',
-      },
-      {
-        model: 'openai/gpt-image-2',
-        size: 'auto',
-        quality: 'high',
-        n: 1,
-        referenceImages: [
-          {
-            dataUrl: 'data:image/png;base64,AAAA',
-            url: 'blob:http://localhost/ref-1',
-          },
-          {
-            dataUrl: '',
-            url: 'https://img.example.com/ref-2.png',
-          },
-        ],
-      },
-      '继续细化',
-    )
-
-    expect(post).toHaveBeenCalledWith('/images', {
-      model: 'openai/gpt-image-2',
+    const result = await requestImages('topic-2', {
       prompt: '继续细化',
-      size: 'auto',
-      quality: 'high',
-      n: 1,
-      input_references: [
-        'data:image/png;base64,AAAA',
-        'https://img.example.com/ref-2.png',
-      ],
+      draft: {
+        size: 'auto',
+      },
     })
+
+    expect(result.images[0].url).toBe('/files/generated/refined.png')
   })
 })
 

@@ -4,6 +4,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { NSelect } from 'naive-ui'
 import InputConsole from './InputConsole.vue'
 import { useChatStore } from '@/store/chat'
+import * as uploadApiModule from '@/services/uploadApi'
 
 describe('InputConsole', () => {
   beforeEach(() => {
@@ -116,6 +117,45 @@ describe('InputConsole', () => {
     await wrapper.get('[data-action="remove-reference"]').trigger('click')
 
     expect(store.currentDraft.referenceImages).toHaveLength(0)
+  })
+
+  it('上传参考图时调用后端上传接口并写入当前草稿', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+
+    const wrapper = mount(InputConsole, {
+      global: {
+        plugins: [pinia],
+      },
+    })
+
+    const store = useChatStore()
+    vi.spyOn(store, 'createTopic').mockResolvedValue('topic-1')
+    vi.spyOn(uploadApiModule, 'uploadReferenceImages').mockResolvedValue([
+      {
+        id: 'ref-1',
+        name: 'scene.png',
+        filePath: '/files/references/scene.png',
+        mimeType: 'image/png',
+        sourceMessageId: null,
+      },
+    ])
+
+    const file = new File(['demo'], 'scene.png', { type: 'image/png' })
+    const input = wrapper.get('[data-action="add-reference"]')
+
+    Object.defineProperty(input.element, 'files', {
+      value: [file],
+      configurable: true,
+    })
+
+    await input.trigger('change')
+
+    expect(uploadApiModule.uploadReferenceImages).toHaveBeenCalledWith('topic-1', [file])
+    expect(store.currentDraft.referenceImages[0]).toMatchObject({
+      filePath: '/files/references/scene.png',
+      url: '/files/references/scene.png',
+    })
   })
 
   it('支持输入区全屏展开和收起', async () => {
