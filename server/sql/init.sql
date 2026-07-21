@@ -75,3 +75,34 @@ CREATE TABLE IF NOT EXISTS message_images (
   created_at BIGINT NOT NULL,
   INDEX idx_message_images_message (message_id)
 );
+
+ALTER TABLE app_settings ADD COLUMN default_provider_id VARCHAR(64) NULL;
+
+CREATE TABLE IF NOT EXISTS providers (
+  id VARCHAR(64) PRIMARY KEY,
+  name VARCHAR(120) NOT NULL,
+  base_url VARCHAR(255) NOT NULL,
+  api_keys JSON NOT NULL,
+  enabled TINYINT(1) NOT NULL DEFAULT 1,
+  request_mode VARCHAR(60) NOT NULL DEFAULT 'openrouter-image',
+  color VARCHAR(20) NULL,
+  is_builtin TINYINT(1) NOT NULL DEFAULT 0,
+  sort_order INT NOT NULL DEFAULT 0,
+  created_at BIGINT NOT NULL,
+  updated_at BIGINT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS provider_models (
+  id VARCHAR(64) PRIMARY KEY,
+  provider_id VARCHAR(64) NOT NULL,
+  model_id VARCHAR(190) NOT NULL,
+  display_name VARCHAR(255) NULL,
+  group_name VARCHAR(120) NULL,
+  is_image TINYINT(1) NOT NULL DEFAULT 0,
+  enabled TINYINT(1) NOT NULL DEFAULT 0,
+  sort_order INT NOT NULL DEFAULT 0,
+  created_at BIGINT NOT NULL,
+  UNIQUE KEY uq_provider_model (provider_id, model_id)
+);
+
+ALTER TABLE drafts ADD COLUMN provider_id VARCHAR(64) NULL;

@@ -31,6 +31,7 @@ export function createDraftRepository(pool) {
         topicId,
         prompt: draft?.prompt || '',
         model: draft?.model || 'openai/gpt-image-2',
+        providerId: draft?.provider_id || '',
         size: draft?.size || 'auto',
         quality: draft?.quality || 'high',
         n: draft?.n || 1,
@@ -90,6 +91,7 @@ export function createDraftRepository(pool) {
       const next = {
         prompt: payload.prompt || '',
         model: payload.model || 'openai/gpt-image-2',
+        providerId: payload.providerId || '',
         size: payload.size || 'auto',
         quality: payload.quality || 'high',
         n: payload.n || 1,
@@ -97,16 +99,26 @@ export function createDraftRepository(pool) {
       }
 
       await executor.query(
-        `INSERT INTO drafts (topic_id, prompt, model, size, quality, n, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO drafts (topic_id, prompt, model, provider_id, size, quality, n, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
          ON DUPLICATE KEY UPDATE
          prompt = VALUES(prompt),
          model = VALUES(model),
+         provider_id = VALUES(provider_id),
          size = VALUES(size),
          quality = VALUES(quality),
          n = VALUES(n),
          updated_at = VALUES(updated_at)`,
-        [topicId, next.prompt, next.model, next.size, next.quality, next.n, next.updatedAt],
+        [
+          topicId,
+          next.prompt,
+          next.model,
+          next.providerId,
+          next.size,
+          next.quality,
+          next.n,
+          next.updatedAt,
+        ],
       )
 
       // 修复 B2：返回真实 referenceImages 而非空数组，

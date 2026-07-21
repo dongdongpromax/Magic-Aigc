@@ -199,7 +199,10 @@ export function createTopicRepository(pool) {
           draft.n || 1,
           'done',
           null,
-          JSON.stringify({ referenceCount: draft.referenceImages?.length || 0 }),
+          JSON.stringify({
+            referenceCount: draft.referenceImages?.length || 0,
+            providerName: draft.providerName || '',
+          }),
           now,
         ],
       )
@@ -222,7 +225,7 @@ export function createTopicRepository(pool) {
           draft.n || 1,
           'done',
           draft.referenceImages?.[0]?.sourceMessageId || userMessageId,
-          JSON.stringify({ imageCount: safeImages.length }),
+          JSON.stringify({ imageCount: safeImages.length, providerName: draft.providerName || '' }),
           now + 1,
         ],
       )

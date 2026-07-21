@@ -55,6 +55,21 @@ vi.mock('@/services/uploadApi', () => ({
   registerReferenceFromMessage: vi.fn().mockResolvedValue({ referenceImages: [] }),
 }))
 
+// bootstrap 现在会并行调 listProviders（providers store），不 mock 会发真实请求
+vi.mock('@/services/providersApi', () => ({
+  listProviders: vi.fn().mockResolvedValue([]),
+  createProvider: vi.fn(),
+  updateProvider: vi.fn(),
+  setProviderEnabled: vi.fn(),
+  deleteProvider: vi.fn(),
+  checkProvider: vi.fn(),
+  listProviderModels: vi.fn().mockResolvedValue([]),
+  fetchProviderModels: vi.fn(),
+  addProviderModel: vi.fn(),
+  setProviderModelEnabled: vi.fn(),
+  deleteProviderModel: vi.fn(),
+}))
+
 describe('ChatArea', () => {
   it('聊天主区域使用可透出背景场景的外层样式', () => {
     setActivePinia(createPinia())
@@ -67,7 +82,7 @@ describe('ChatArea', () => {
           ImageMessageCard: true,
           InputConsole: true,
           MessageBubble: true,
-          SettingsDrawer: true,
+          SettingsModal: true,
         },
       },
     })

@@ -7,7 +7,7 @@ import ConnectionBadge from './ConnectionBadge.vue'
 import ImageMessageCard from './ImageMessageCard.vue'
 import InputConsole from './InputConsole.vue'
 import MessageBubble from './MessageBubble.vue'
-import SettingsDrawer from './SettingsDrawer.vue'
+import SettingsModal from './settings/SettingsModal.vue'
 
 const chatStore = useChatStore()
 
@@ -128,7 +128,7 @@ onBeforeUnmount(() => {
       <InputConsole />
     </div>
 
-    <SettingsDrawer
+    <SettingsModal
       :show="chatStore.settingsVisible"
       @update:show="chatStore.settingsVisible = $event"
     />

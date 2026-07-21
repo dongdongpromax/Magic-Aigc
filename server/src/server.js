@@ -8,18 +8,19 @@ import { createSettingsRepository } from './db/repositories/settingsRepository.j
 import { createTopicRepository } from './db/repositories/topicRepository.js'
 import { createDraftRepository } from './db/repositories/draftRepository.js'
 import { verifyDatabaseConnection } from './db/init.js'
+import { migrateProvidersSchema, seedProvidersIfEmpty } from './db/seedProviders.js'
+import { createProvidersRepository } from './db/repositories/providersRepository.js'
 import { runTransaction } from './db/transaction.js'
 import { createFileStorage } from './modules/images/fileStorage.js'
-import { createOpenRouterClient } from './modules/images/openrouterClient.js'
+import { createUpstreamClient } from './modules/providers/upstreamClient.js'
+import { createProvidersService } from './modules/providers/providersService.js'
+import { buildImagePayload } from './modules/providers/imagePayload.js'
 
 const env = getServerEnv()
 const pool = createPool(env)
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const storageRoot = path.resolve(__dirname, '../storage')
 const fileStorage = createFileStorage({ rootDir: storageRoot })
-const openRouterClient = createOpenRouterClient({
-  apiKey: env.openrouterApiKey,
-})
 
 /**
  * 生成唯一 ID，优先使用 crypto.randomUUID，回退到时间戳+随机数
@@ -87,13 +88,37 @@ try {
 await fileStorage.ensureDirs()
 
 const settingsRepository = createSettingsRepository(pool)
+
+// providers 迁移与首次 seed（幂等）；失败不阻断启动，API 调用时会再次暴露问题
+try {
+  await migrateProvidersSchema(pool)
+  const legacy = await settingsRepository.getSettings()
+  await seedProvidersIfEmpty(pool, {
+    envApiKey: env.openrouterApiKey,
+    legacyBaseURL: legacy.baseURL,
+    legacyDefaultModel: legacy.defaultModel,
+  })
+} catch (err) {
+  console.warn(
+    `[startup] providers 迁移/seed 失败（不影响启动，API 调用时可能报错）：${err?.message || err}`,
+  )
+}
+
 const topicRepository = createTopicRepository(pool)
 const draftRepository = createDraftRepository(pool)
+const providersRepository = createProvidersRepository(pool)
+const upstreamClient = createUpstreamClient()
+const providersService = createProvidersService({
+  providersRepository,
+  upstreamClient,
+  settingsRepository,
+})
 
 const app = createApp({
   settingsRepository,
   topicRepository,
   draftRepository,
+  providersService,
   // P1-6: 健康检查注入，/api/health 会调用此函数探测 DB
   healthCheck: async () => verifyDatabaseConnection(pool),
   imageService: {
@@ -162,7 +187,7 @@ const app = createApp({
     },
 
     /**
-     * 生成图片消息：调用 OpenRouter → 写文件 → 事务内保存消息/清理参考图/重置草稿
+     * 生成图片消息：解析中转站 → 调上游 → 写文件 → 事务内保存消息/清理参考图/重置草稿
      *
      * 事务边界：saveGeneratedConversation + clearReferenceImages + saveDraft 三步原子化
      * 文件清理：先写盘再开事务，DB 失败时 best-effort unlink 已写文件
@@ -174,24 +199,20 @@ const app = createApp({
         (draft.referenceImages || []).map((item) => resolveReferenceInput(fileStorage, item)),
       )
 
-      const openrouterPayload = {
+      // 按 draft.providerId 解析中转站（含 default_provider_id → 第一个 enabled 回退链）
+      const provider = await providersService.resolveForDraft(draft.providerId)
+
+      const openrouterPayload = buildImagePayload({
         model: draft.model || settings.defaultModel,
         prompt: payload.prompt || draft.prompt || '',
         size: draft.size || settings.defaultSize,
         quality: draft.quality || settings.defaultQuality,
         n: draft.n || settings.defaultN,
-      }
-
-      if (inputReferences.length) {
-        openrouterPayload.input_references = inputReferences
-      }
+        inputReferences,
+      })
 
       // API 调用失败时还没写文件，无需清理
-      const response = await openRouterClient.generateImages({
-        baseURL: settings.baseURL,
-        payload: openrouterPayload,
-        timeout: settings.timeout,
-      })
+      const response = await upstreamClient.generateImages(provider, openrouterPayload, settings.timeout)
 
       // 文件先写盘（b64 太大不便在事务里持连接），记录所有成功写入的路径
       const writtenPaths = []
@@ -227,7 +248,7 @@ const app = createApp({
               topicId,
               prompt: payload.prompt || '',
               revisedPrompt: response.revised_prompt || '',
-              draft,
+              draft: { ...draft, providerName: provider.name },
               images,
             },
             conn,
@@ -240,6 +261,7 @@ const app = createApp({
         return {
           images: message.images,
           revisedPrompt: message.revisedPrompt,
+          providerName: provider.name,
         }
       } catch (err) {
         // DB 失败但文件已写 → best-effort 清理，避免孤儿文件

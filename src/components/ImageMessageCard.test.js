@@ -45,4 +45,33 @@ describe('ImageMessageCard', () => {
     expect(wrapper.get('[data-role="image-frame"]').attributes('style')).toContain('max-width: 720px')
     expect(wrapper.get('[data-role="image-frame"]').attributes('style')).toContain('max-height: 420px')
   })
+
+  it('meta 含 providerName 时在模型名后展示中转站名', () => {
+    const wrapper = mount(ImageMessageCard, {
+      props: {
+        message: {
+          images: [{ id: '1', url: 'https://img.example.com/1.png' }],
+          model: 'openai/gpt-image-2',
+          size: '1024x1024',
+          meta: { providerName: '硅基流动' },
+        },
+      },
+    })
+
+    expect(wrapper.get('[data-role="provider-name"]').text()).toBe('硅基流动')
+  })
+
+  it('meta 无 providerName 时不渲染中转站位（旧消息兼容）', () => {
+    const wrapper = mount(ImageMessageCard, {
+      props: {
+        message: {
+          images: [{ id: '1', url: 'https://img.example.com/1.png' }],
+          model: 'openai/gpt-image-2',
+          size: '1024x1024',
+        },
+      },
+    })
+
+    expect(wrapper.find('[data-role="provider-name"]').exists()).toBe(false)
+  })
 })

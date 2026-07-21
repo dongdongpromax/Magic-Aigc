@@ -17,6 +17,7 @@ import {
 import { buildImageFileName, buildTimestamp, triggerBrowserDownload } from '@/utils/download'
 import { MAX_REFERENCE_IMAGES } from '@/utils/constants'
 import { createStatusMessage, createUserPromptMessage } from '@/utils/message'
+import { useProvidersStore } from '@/store/providers'
 
 /**
  * 聊天 store
@@ -32,6 +33,8 @@ import { createStatusMessage, createUserPromptMessage } from '@/utils/message'
  */
 export const useChatStore = defineStore('chat', () => {
   const defaults = getDefaultAppConfig()
+  // hasConfig 改为读 providers store：存在「启用且有 Key」的中转站才可用
+  const providersStore = useProvidersStore()
 
   const appConfig = reactive({
     baseURL: defaults.baseURL,
@@ -64,6 +67,7 @@ export const useChatStore = defineStore('chat', () => {
   const transientDraft = reactive({
     prompt: '',
     model: appConfig.defaultModel,
+    providerId: '',
     size: appConfig.defaultSize,
     quality: appConfig.defaultQuality,
     n: appConfig.defaultN,
@@ -93,6 +97,7 @@ export const useChatStore = defineStore('chat', () => {
     drafts[topicId] ||= {
       prompt: '',
       model: appConfig.defaultModel,
+      providerId: '',
       size: appConfig.defaultSize,
       quality: appConfig.defaultQuality,
       n: appConfig.defaultN,
@@ -133,7 +138,7 @@ export const useChatStore = defineStore('chat', () => {
     requestMode: appConfig.requestMode,
   }))
 
-  const hasConfig = computed(() => Boolean(appConfig.baseURL))
+  const hasConfig = computed(() => providersStore.hasUsableProvider)
 
   const config = computed({
     get: () => currentDraft.value,
@@ -152,7 +157,8 @@ export const useChatStore = defineStore('chat', () => {
     isBootstrapping.value = true
 
     try {
-      Object.assign(appConfig, defaults, await getSettings())
+      const [settings] = await Promise.all([getSettings(), providersStore.loadProviders()])
+      Object.assign(appConfig, defaults, settings)
       topics.value = await listTopics()
 
       if (topics.value.length) {
@@ -371,6 +377,7 @@ export const useChatStore = defineStore('chat', () => {
     return {
       prompt: draft.prompt || '',
       model: draft.model || appConfig.defaultModel,
+      providerId: draft.providerId || '',
       size: draft.size || appConfig.defaultSize,
       quality: draft.quality || appConfig.defaultQuality,
       n: draft.n || appConfig.defaultN,
@@ -504,6 +511,7 @@ export const useChatStore = defineStore('chat', () => {
       quality: draft.quality,
       n: draft.n,
       sourceMessageId: draft.referenceImages[0]?.sourceMessageId || null,
+      meta: { providerName: result.providerName || '' },
       createdAt: Date.now(),
     })
 

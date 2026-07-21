@@ -42,6 +42,37 @@ vi.mock('@/services/uploadApi', () => ({
   registerReferenceFromMessage: vi.fn().mockResolvedValue({ referenceImages: [] }),
 }))
 
+// 多中转站：hasConfig / bootstrap 依赖 providers store → providersApi
+vi.mock('@/services/providersApi', () => ({
+  listProviders: vi.fn().mockResolvedValue([
+    {
+      id: 'openrouter',
+      name: 'OpenRouter',
+      baseUrl: 'https://openrouter.ai/api/v1',
+      apiKeys: ['sk-a'],
+      enabled: true,
+      enabledModels: [{ modelId: 'openai/gpt-image-2', displayName: 'GPT Image 2' }],
+    },
+  ]),
+  createProvider: vi.fn(),
+  updateProvider: vi.fn(),
+  setProviderEnabled: vi.fn(),
+  deleteProvider: vi.fn(),
+  checkProvider: vi.fn(),
+  listProviderModels: vi.fn().mockResolvedValue([]),
+  fetchProviderModels: vi.fn(),
+  addProviderModel: vi.fn(),
+  setProviderModelEnabled: vi.fn(),
+  deleteProviderModel: vi.fn(),
+}))
+
+// completeImageGeneration 会触发浏览器下载，jsdom 里替换为空实现
+vi.mock('@/utils/download', () => ({
+  buildImageFileName: vi.fn(() => 'test.png'),
+  buildTimestamp: vi.fn(() => '20260722'),
+  triggerBrowserDownload: vi.fn(),
+}))
+
 describe('chat store', () => {
   beforeEach(() => {
     vi.useFakeTimers()
@@ -247,5 +278,49 @@ describe('chat store', () => {
     expect(createTopicMock).toHaveBeenCalledWith('新建创作')
     expect(store.topics).toHaveLength(1)
     expect(store.currentTopicId).toBe('topic-new')
+  })
+
+  it('hasConfig 反映是否存在「启用且有 Key」的中转站', async () => {
+    const { useProvidersStore } = await import('./providers')
+    const store = useChatStore()
+    const providersStore = useProvidersStore()
+
+    await store.bootstrap()
+    expect(store.hasConfig).toBe(true)
+
+    // 唯一一家的 Key 清空后变为不可用
+    providersStore.providers[0].apiKeys = []
+    expect(store.hasConfig).toBe(false)
+  })
+
+  it('草稿序列化携带 providerId，防抖保存传给后端', async () => {
+    const store = useChatStore()
+    await store.createTopic('海报概念')
+
+    store.currentDraft.providerId = 'siliconflow'
+    vi.advanceTimersByTime(300)
+
+    expect(saveDraftMock).toHaveBeenCalledWith(
+      'topic-1',
+      expect.objectContaining({ providerId: 'siliconflow' }),
+    )
+  })
+
+  it('completeImageGeneration 把 providerName 写入消息 meta', async () => {
+    const store = useChatStore()
+    await store.createTopic('海报概念')
+    await store.addUserPrompt('画一只猫')
+
+    await store.completeImageGeneration(
+      {
+        images: [{ id: 'img-1', url: 'data:image/png;base64,x' }],
+        revisedPrompt: '',
+        providerName: '硅基流动',
+      },
+      '画一只猫',
+    )
+
+    const assistant = store.currentMessages.find((m) => m.type === 'assistant_images')
+    expect(assistant.meta.providerName).toBe('硅基流动')
   })
 })

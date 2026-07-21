@@ -13,6 +13,7 @@ export function createSettingsRepository(pool) {
             defaultN: row.default_n,
             requestMode: row.request_mode,
             timeout: row.timeout,
+            defaultProviderId: row.default_provider_id || '',
           }
         : {
             baseURL: 'https://openrouter.ai/api/v1',
@@ -22,6 +23,7 @@ export function createSettingsRepository(pool) {
             defaultN: 1,
             requestMode: 'openrouter-image',
             timeout: 1200000,
+            defaultProviderId: '',
           }
     },
 
@@ -35,12 +37,13 @@ export function createSettingsRepository(pool) {
         // P1-1: 与前端 env.js 默认值和 SettingsDrawer 选项对齐
         requestMode: payload.requestMode || 'openrouter-image',
         timeout: payload.timeout || 1200000,
+        defaultProviderId: payload.defaultProviderId || '',
       }
 
       await pool.query(
         `INSERT INTO app_settings
-          (id, base_url, default_model, default_size, default_quality, default_n, request_mode, timeout)
-         VALUES (1, ?, ?, ?, ?, ?, ?, ?)
+          (id, base_url, default_model, default_size, default_quality, default_n, request_mode, timeout, default_provider_id)
+         VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
          ON DUPLICATE KEY UPDATE
          base_url = VALUES(base_url),
          default_model = VALUES(default_model),
@@ -48,7 +51,8 @@ export function createSettingsRepository(pool) {
          default_quality = VALUES(default_quality),
          default_n = VALUES(default_n),
          request_mode = VALUES(request_mode),
-         timeout = VALUES(timeout)`,
+         timeout = VALUES(timeout),
+         default_provider_id = VALUES(default_provider_id)`,
         [
           next.baseURL,
           next.defaultModel,
@@ -57,6 +61,7 @@ export function createSettingsRepository(pool) {
           next.defaultN,
           next.requestMode,
           next.timeout,
+          next.defaultProviderId,
         ],
       )
 

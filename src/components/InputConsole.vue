@@ -1,20 +1,20 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, h, onBeforeUnmount, onMounted, ref } from 'vue'
 import { Image as ImageIcon, Send, Settings2, Sparkles } from 'lucide-vue-next'
 import { NSelect } from 'naive-ui'
 import { requestImages } from '@/services/imageSession'
 import { uploadReferenceImages } from '@/services/uploadApi'
 import { useChatStore } from '@/store/chat'
+import { useProvidersStore } from '@/store/providers'
 import { MAX_REFERENCE_IMAGES } from '@/utils/constants'
 
 const chatStore = useChatStore()
+const providersStore = useProvidersStore()
 const isLoading = ref(false)
 const isSizePanelVisible = ref(false)
 const uploadHint = ref(`最多上传 ${MAX_REFERENCE_IMAGES} 张参考图`)
 // P1-7: 引用共享常量，避免魔法数字散落
 const maxReferenceImages = MAX_REFERENCE_IMAGES
-
-const models = [{ label: 'GPT Image 2', value: 'openai/gpt-image-2' }]
 
 const counts = [1, 2, 3, 4]
 
@@ -55,6 +55,67 @@ const sizeGroups = computed(() => {
 const countOptions = counts.map((count) => ({ label: `${count} 张`, value: count }))
 
 const draft = computed(() => chatStore.currentDraft)
+
+/**
+ * 模型分组下拉选项：组 = 启用中的中转站，选项 = 该家已启用模型
+ * option value 为复合键 `${providerId}::${modelId}`；
+ * option label 带「· 中转站名」后缀用于触发器回显（spec 5.3），下拉里由 renderLabel 只显示模型名
+ */
+const modelGroups = computed(() =>
+  providersStore.enabledProviders
+    .filter((provider) => provider.enabledModels?.length)
+    .map((provider) => ({
+      type: 'group',
+      label: provider.name,
+      key: provider.id,
+      color: provider.color || '',
+      children: provider.enabledModels.map((model) => ({
+        label: `${model.displayName || model.modelId} · ${provider.name}`,
+        value: `${provider.id}::${model.modelId}`,
+        modelLabel: model.displayName || model.modelId,
+      })),
+    })),
+)
+
+/**
+ * 复合选中值 <-> draft.providerId + draft.model 双向拆合
+ * 用 indexOf 而非 split：providerId 是 slug 不含 '::'，modelId 理论上可能含冒号
+ */
+const selectedModelKey = computed({
+  get: () =>
+    draft.value.providerId && draft.value.model
+      ? `${draft.value.providerId}::${draft.value.model}`
+      : null,
+  set: (key) => {
+    if (!key) return
+    const separatorIndex = key.indexOf('::')
+    draft.value.providerId = key.slice(0, separatorIndex)
+    draft.value.model = key.slice(separatorIndex + 2)
+  },
+})
+
+/**
+ * 下拉项渲染：组标题前加中转站色块圆点，模型项只显示模型名
+ * 下拉菜单 teleport 到 body，scoped 样式不生效——圆点样式全部内联
+ */
+function renderModelLabel(option) {
+  if (option.type === 'group') {
+    return [
+      h('span', {
+        style: {
+          display: 'inline-block',
+          width: '8px',
+          height: '8px',
+          borderRadius: '50%',
+          marginRight: '6px',
+          background: option.color || 'rgba(255, 255, 255, 0.35)',
+        },
+      }),
+      option.label,
+    ]
+  }
+  return option.modelLabel
+}
 const canSend = computed(() => Boolean(draft.value.prompt.trim()) && !isLoading.value)
 const selectedSizeLabel = computed(() => {
   const item = sizeOptions.find((opt) => opt.value === draft.value.size)
@@ -251,11 +312,24 @@ async function handleSend() {
         <div class="tool-chip model-chip">
           <ImageIcon :size="15" />
           <n-select
-            v-model:value="draft.model"
-            :options="models"
+            v-if="modelGroups.length"
+            v-model:value="selectedModelKey"
+            :options="modelGroups"
+            :render-label="renderModelLabel"
             class="tool-picker model-select"
             size="small"
+            placeholder="选择模型"
+            data-role="model-select"
           />
+          <button
+            v-else
+            type="button"
+            class="empty-model-btn"
+            data-action="open-settings-empty"
+            @click="chatStore.openSettings"
+          >
+            去设置添加模型
+          </button>
         </div>
 
         <div class="tool-chip size-trigger" :class="{ 'is-open': isSizePanelVisible }">
@@ -540,6 +614,20 @@ async function handleSend() {
 
 .model-select {
   min-width: 188px;
+}
+
+.empty-model-btn {
+  border: none;
+  background: transparent;
+  color: rgba(119, 168, 255, 0.9);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 0 2px;
+  white-space: nowrap;
+
+  &:hover {
+    text-decoration: underline;
+  }
 }
 
 .size-trigger {

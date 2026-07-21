@@ -4,6 +4,7 @@ import cors from 'cors'
 import express from 'express'
 import { MulterError } from 'multer'
 import { createImageRoutes } from './modules/images/routes.js'
+import { createProviderRoutes } from './modules/providers/routes.js'
 import { createSettingsRoutes } from './modules/settings/routes.js'
 import { createTopicRoutes } from './modules/topics/routes.js'
 
@@ -30,6 +31,7 @@ function isClientError(error) {
  *   draftRepository?: object;
  *   imageService?: object;
  *   topicService?: object;
+ *   providersService?: object;
  *   healthCheck?: () => Promise<void>;
  * }} deps 依赖注入
  */
@@ -69,6 +71,10 @@ export function createApp(deps = {}) {
     }),
   )
   app.use('/api', createImageRoutes({ imageService: deps.imageService }))
+  // deps.providersService 未注入时（旧测试）跳过，保持向后兼容
+  if (deps.providersService) {
+    app.use('/api', createProviderRoutes({ providersService: deps.providersService }))
+  }
 
   // P0-6: 错误处理中间件分类脱敏
   // - 客户端错误（multer/业务校验/4xx）：返回具体消息

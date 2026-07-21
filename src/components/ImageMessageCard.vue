@@ -25,6 +25,10 @@ defineProps({
         <span class="role-title">图像结果</span>
         <span class="meta-sep">·</span>
         <span class="meta-item">{{ message.model }}</span>
+        <template v-if="message.meta?.providerName">
+          <span class="meta-sep">·</span>
+          <span class="meta-item" data-role="provider-name">{{ message.meta.providerName }}</span>
+        </template>
         <span class="meta-sep">·</span>
         <span class="meta-item">{{ message.size }}</span>
       </div>

@@ -4,7 +4,42 @@ import { createPinia, setActivePinia } from 'pinia'
 import { NSelect } from 'naive-ui'
 import InputConsole from './InputConsole.vue'
 import { useChatStore } from '@/store/chat'
+import { requestImages } from '@/services/imageSession'
+import { useProvidersStore } from '@/store/providers'
 import * as uploadApiModule from '@/services/uploadApi'
+
+vi.mock('@/services/imageSession', () => ({
+  requestImages: vi.fn(),
+}))
+
+/**
+ * 向 providers store 注入两家中转站：
+ * openrouter 启用（含 2 个启用模型）；siliconflow 停用（不应出现在选择器）
+ */
+function seedProviders() {
+  const providersStore = useProvidersStore()
+  providersStore.providers = [
+    {
+      id: 'openrouter',
+      name: 'OpenRouter',
+      color: '#6366f1',
+      enabled: true,
+      apiKeys: ['sk-a'],
+      enabledModels: [
+        { modelId: 'openai/gpt-image-2', displayName: 'GPT Image 2' },
+        { modelId: 'flux/dev', displayName: '' },
+      ],
+    },
+    {
+      id: 'siliconflow',
+      name: '硅基流动',
+      color: '#10b981',
+      enabled: false,
+      apiKeys: [],
+      enabledModels: [{ modelId: 'qwen/image', displayName: 'Qwen Image' }],
+    },
+  ]
+}
 
 describe('InputConsole', () => {
   beforeEach(() => {
@@ -15,6 +50,7 @@ describe('InputConsole', () => {
   it('将输入同步到当前草稿并启用发送按钮', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
+    seedProviders()
 
     const wrapper = mount(InputConsole, {
       global: {
@@ -38,6 +74,7 @@ describe('InputConsole', () => {
   it('点击尺寸触发器后显示网格弹层', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
+    seedProviders()
 
     const wrapper = mount(InputConsole, {
       global: {
@@ -241,5 +278,93 @@ describe('InputConsole', () => {
 
     expect(preventDefault).not.toHaveBeenCalled()
     expect(uploadApiModule.uploadReferenceImages).not.toHaveBeenCalled()
+  })
+
+  it('模型选择器按中转站分组渲染选项', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    seedProviders()
+
+    const wrapper = mount(InputConsole, {
+      global: { plugins: [pinia] },
+    })
+
+    const modelSelect = wrapper.findAllComponents(NSelect)[0]
+    const options = modelSelect.props('options')
+
+    // 停用的一家不出现在选项里
+    expect(options).toHaveLength(1)
+    expect(options[0].type).toBe('group')
+    expect(options[0].label).toBe('OpenRouter')
+    expect(options[0].children).toHaveLength(2)
+    expect(options[0].children[0]).toMatchObject({
+      label: 'GPT Image 2 · OpenRouter',
+      value: 'openrouter::openai/gpt-image-2',
+    })
+    // 无 displayName 的模型回退显示 modelId
+    expect(options[0].children[1].label).toBe('flux/dev · OpenRouter')
+  })
+
+  it('选中模型拆存为 draft.providerId + draft.model', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    seedProviders()
+
+    const wrapper = mount(InputConsole, {
+      global: { plugins: [pinia] },
+    })
+    const store = useChatStore()
+
+    const modelSelect = wrapper.findAllComponents(NSelect)[0]
+    modelSelect.vm.$emit('update:value', 'openrouter::flux/dev')
+
+    expect(store.currentDraft.providerId).toBe('openrouter')
+    expect(store.currentDraft.model).toBe('flux/dev')
+  })
+
+  it('无任何启用模型时显示引导入口，点击打开设置模态', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    // 不 seed：providers 为空 → 无可用模型
+
+    const wrapper = mount(InputConsole, {
+      global: { plugins: [pinia] },
+    })
+    const store = useChatStore()
+
+    const entry = wrapper.find('[data-action="open-settings-empty"]')
+    expect(entry.exists()).toBe(true)
+    await entry.trigger('click')
+    expect(store.settingsVisible).toBe(true)
+  })
+
+  it('发送时 requestImages 的 draft 携带 providerId', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    seedProviders()
+
+    const wrapper = mount(InputConsole, {
+      global: { plugins: [pinia] },
+    })
+    const store = useChatStore()
+    vi.spyOn(store, 'addUserPrompt').mockResolvedValue('topic-1')
+    vi.spyOn(store, 'completeImageGeneration').mockResolvedValue()
+    requestImages.mockResolvedValue({ images: [], revisedPrompt: '' })
+
+    store.currentDraft.providerId = 'openrouter'
+    store.currentDraft.model = 'openai/gpt-image-2'
+    await wrapper.find('textarea').setValue('画一只猫')
+    await wrapper.find('.send-btn').trigger('click')
+    await flushPromises()
+
+    expect(requestImages).toHaveBeenCalledWith(
+      'topic-1',
+      expect.objectContaining({
+        draft: expect.objectContaining({
+          providerId: 'openrouter',
+          model: 'openai/gpt-image-2',
+        }),
+      }),
+    )
   })
 })
