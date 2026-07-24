@@ -1,4 +1,4 @@
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import Sidebar from './Sidebar.vue'
@@ -53,9 +53,11 @@ describe('Sidebar', () => {
   beforeEach(() => {
     localStorage.clear()
     setActivePinia(createPinia())
+    // ConfirmDialog 通过 Teleport 挂到 body，测试间清理避免串扰
+    document.body.innerHTML = ''
   })
 
-  it('显示图像工作台并支持新建创作', async () => {
+  it('显示创作工坊并支持新建创作', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
 
@@ -65,7 +67,7 @@ describe('Sidebar', () => {
       },
     })
 
-    expect(wrapper.text()).toContain('图像工作台')
+    expect(wrapper.text()).toContain('创作工坊')
     expect(wrapper.text()).toContain('新建创作')
 
     const store = useChatStore()
@@ -104,7 +106,7 @@ describe('Sidebar', () => {
     expect(deleteBtn.exists()).toBe(true)
   })
 
-  it('点击删除按钮时弹 confirm，确认后调 chatStore.deleteTopic', async () => {
+  it('点击删除按钮时弹二次确认，确认后调 chatStore.deleteTopic', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     const store = useChatStore()
@@ -123,8 +125,6 @@ describe('Sidebar', () => {
     ]
     store.currentTopicId = 'topic-1'
 
-    // mock window.confirm 返回 true（确认删除）
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
     // mock store.deleteTopic 避免真实 API 调用
     const deleteTopicSpy = vi.spyOn(store, 'deleteTopic').mockResolvedValue(undefined)
 
@@ -132,18 +132,22 @@ describe('Sidebar', () => {
       global: { plugins: [pinia] },
     })
 
-    const deleteBtn = wrapper.find('[data-action="delete-topic"]')
-    await deleteBtn.trigger('click')
+    await wrapper.find('[data-action="delete-topic"]').trigger('click')
+    await flushPromises()
 
-    // 应弹出 confirm
-    expect(confirmSpy).toHaveBeenCalled()
-    // 确认后应调 store.deleteTopic
+    // 点击删除只弹出确认框，尚未真正删除
+    // Teleport 在测试中被 stub（见 setup.js），内容原地渲染，用 wrapper 查询
+    expect(wrapper.find('[data-role="confirm-dialog"]').exists()).toBe(true)
+    expect(deleteTopicSpy).not.toHaveBeenCalled()
+
+    // 点击「删除」确认
+    await wrapper.find('[data-action="confirm-confirm"]').trigger('click')
+    await flushPromises()
+
     expect(deleteTopicSpy).toHaveBeenCalledWith('topic-1')
-
-    confirmSpy.mockRestore()
   })
 
-  it('confirm 取消时不调 chatStore.deleteTopic', async () => {
+  it('取消确认时不调 chatStore.deleteTopic', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     const store = useChatStore()
@@ -162,21 +166,20 @@ describe('Sidebar', () => {
     ]
     store.currentTopicId = 'topic-1'
 
-    // mock window.confirm 返回 false（取消）
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
     const deleteTopicSpy = vi.spyOn(store, 'deleteTopic').mockResolvedValue(undefined)
 
     const wrapper = mount(Sidebar, {
       global: { plugins: [pinia] },
     })
 
-    const deleteBtn = wrapper.find('[data-action="delete-topic"]')
-    await deleteBtn.trigger('click')
+    await wrapper.find('[data-action="delete-topic"]').trigger('click')
+    await flushPromises()
 
-    expect(confirmSpy).toHaveBeenCalled()
+    // 点击「取消」
+    await wrapper.find('[data-action="confirm-cancel"]').trigger('click')
+    await flushPromises()
+
     // 取消时不应调 deleteTopic
     expect(deleteTopicSpy).not.toHaveBeenCalled()
-
-    confirmSpy.mockRestore()
   })
 })

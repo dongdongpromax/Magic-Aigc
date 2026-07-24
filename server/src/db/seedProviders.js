@@ -51,6 +51,13 @@ export const PRESET_PROVIDERS = [
     color: '#ef4444',
     enabled: 0,
   },
+  {
+    id: 'volcengine',
+    name: '火山方舟',
+    baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
+    color: '#ff6b35',
+    enabled: 0,
+  },
 ]
 
 /**
@@ -128,6 +135,72 @@ export async function migrateProvidersSchema(pool) {
     'app_settings',
     'default_provider_id',
     'ALTER TABLE app_settings ADD COLUMN default_provider_id VARCHAR(64) NULL',
+  )
+  // 视频模型默认参数：通用设置按模型类型分区，视频默认比例/时长/清晰度/参考模式持久化
+  await ensureColumn(
+    pool,
+    'app_settings',
+    'default_ratio',
+    'ALTER TABLE app_settings ADD COLUMN default_ratio VARCHAR(16) NULL',
+  )
+  await ensureColumn(
+    pool,
+    'app_settings',
+    'default_duration',
+    'ALTER TABLE app_settings ADD COLUMN default_duration INT NULL',
+  )
+  await ensureColumn(
+    pool,
+    'app_settings',
+    'default_resolution',
+    'ALTER TABLE app_settings ADD COLUMN default_resolution VARCHAR(16) NULL',
+  )
+  await ensureColumn(
+    pool,
+    'app_settings',
+    'default_video_ref_mode',
+    'ALTER TABLE app_settings ADD COLUMN default_video_ref_mode VARCHAR(16) NULL',
+  )
+  // 视频模型支持：provider_models 增加 is_video 列（与 is_image 并列，区分视频生成模型）
+  await ensureColumn(
+    pool,
+    'provider_models',
+    'is_video',
+    'ALTER TABLE provider_models ADD COLUMN is_video TINYINT(1) NOT NULL DEFAULT 0 AFTER is_image',
+  )
+  // 模型类型标签：provider_models 增加 model_type 列（存储 image/video/text/embedding/audio/other）
+  await ensureColumn(
+    pool,
+    'provider_models',
+    'model_type',
+    "ALTER TABLE provider_models ADD COLUMN model_type VARCHAR(20) NOT NULL DEFAULT 'other' AFTER is_video",
+  )
+  // 视频参考模式：drafts 增加 video_ref_mode 列（与持久化的参考图同步，防刷新后模式与图片错配）
+  await ensureColumn(
+    pool,
+    'drafts',
+    'video_ref_mode',
+    "ALTER TABLE drafts ADD COLUMN video_ref_mode VARCHAR(16) NOT NULL DEFAULT 'first_frame'",
+  )
+}
+
+/**
+ * 幂等 upsert 预设中转站
+ *
+ * 用于让旧部署（providers 表已有数据，未走 seedProvidersIfEmpty）
+ * 也能拿到新增的预设中转站（如火山方舟）。
+ * 已存在记录仅更新 name/base_url/color，不影响 enabled/api_keys/is_builtin。
+ *
+ * @param {import('mysql2/promise').Pool} pool
+ * @param {{ id: string; name: string; baseUrl: string; color?: string; enabled?: number }} preset
+ */
+export async function upsertPresetProvider(pool, preset) {
+  await pool.query(
+    `INSERT INTO providers
+      (id, name, base_url, api_keys, enabled, request_mode, color, is_builtin, sort_order, created_at, updated_at)
+     VALUES (?, ?, ?, '[]', ?, 'openrouter-image', ?, 1, 999, ?, ?)
+     ON DUPLICATE KEY UPDATE name = VALUES(name), base_url = VALUES(base_url), color = VALUES(color)`,
+    [preset.id, preset.name, preset.baseUrl, preset.enabled ?? 0, preset.color || null, Date.now(), Date.now()],
   )
 }
 

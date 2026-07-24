@@ -31,6 +31,11 @@ describe('migrateProvidersSchema', () => {
     expect(sqls).toContain('CREATE TABLE IF NOT EXISTS provider_models')
     expect(sqls).toContain('ALTER TABLE drafts ADD COLUMN provider_id')
     expect(sqls).toContain('ALTER TABLE app_settings ADD COLUMN default_provider_id')
+    // 视频模型默认参数列（通用设置按模型类型分区持久化）
+    expect(sqls).toContain('ALTER TABLE app_settings ADD COLUMN default_ratio')
+    expect(sqls).toContain('ALTER TABLE app_settings ADD COLUMN default_duration')
+    expect(sqls).toContain('ALTER TABLE app_settings ADD COLUMN default_resolution')
+    expect(sqls).toContain('ALTER TABLE app_settings ADD COLUMN default_video_ref_mode')
   })
 
   it('列已存在时跳过 ALTER（幂等）', async () => {

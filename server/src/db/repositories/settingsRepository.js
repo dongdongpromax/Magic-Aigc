@@ -14,6 +14,11 @@ export function createSettingsRepository(pool) {
             requestMode: row.request_mode,
             timeout: row.timeout,
             defaultProviderId: row.default_provider_id || '',
+            // 视频模型默认参数（通用设置按模型类型分区持久化）
+            defaultRatio: row.default_ratio || '16:9',
+            defaultDuration: row.default_duration ?? 5,
+            defaultResolution: row.default_resolution || '720p',
+            defaultVideoRefMode: row.default_video_ref_mode || 'first_frame',
           }
         : {
             baseURL: 'https://openrouter.ai/api/v1',
@@ -24,6 +29,10 @@ export function createSettingsRepository(pool) {
             requestMode: 'openrouter-image',
             timeout: 1200000,
             defaultProviderId: '',
+            defaultRatio: '16:9',
+            defaultDuration: 5,
+            defaultResolution: '720p',
+            defaultVideoRefMode: 'first_frame',
           }
     },
 
@@ -38,12 +47,18 @@ export function createSettingsRepository(pool) {
         requestMode: payload.requestMode || 'openrouter-image',
         timeout: payload.timeout || 1200000,
         defaultProviderId: payload.defaultProviderId || '',
+        // 视频模型默认参数（通用设置按模型类型分区持久化）
+        defaultRatio: payload.defaultRatio || '16:9',
+        defaultDuration: payload.defaultDuration ?? 5,
+        defaultResolution: payload.defaultResolution || '720p',
+        defaultVideoRefMode: payload.defaultVideoRefMode || 'first_frame',
       }
 
       await pool.query(
         `INSERT INTO app_settings
-          (id, base_url, default_model, default_size, default_quality, default_n, request_mode, timeout, default_provider_id)
-         VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
+          (id, base_url, default_model, default_size, default_quality, default_n, request_mode, timeout, default_provider_id,
+           default_ratio, default_duration, default_resolution, default_video_ref_mode)
+         VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON DUPLICATE KEY UPDATE
          base_url = VALUES(base_url),
          default_model = VALUES(default_model),
@@ -52,7 +67,11 @@ export function createSettingsRepository(pool) {
          default_n = VALUES(default_n),
          request_mode = VALUES(request_mode),
          timeout = VALUES(timeout),
-         default_provider_id = VALUES(default_provider_id)`,
+         default_provider_id = VALUES(default_provider_id),
+         default_ratio = VALUES(default_ratio),
+         default_duration = VALUES(default_duration),
+         default_resolution = VALUES(default_resolution),
+         default_video_ref_mode = VALUES(default_video_ref_mode)`,
         [
           next.baseURL,
           next.defaultModel,
@@ -62,6 +81,10 @@ export function createSettingsRepository(pool) {
           next.requestMode,
           next.timeout,
           next.defaultProviderId,
+          next.defaultRatio,
+          next.defaultDuration,
+          next.defaultResolution,
+          next.defaultVideoRefMode,
         ],
       )
 

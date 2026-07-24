@@ -276,6 +276,131 @@ export function createTopicRepository(pool) {
     },
 
     /**
+     * 保存一次完整的视频生成对话（用户 prompt + AI 视频消息 + 视频元数据 + 主题更新）
+     *
+     * 平行于 saveGeneratedConversation，区别：
+     * - assistant 消息 type 为 'assistant_videos'
+     * - 媒体元数据写入 message_images，mime_type='video/mp4'（复用该表作「媒体文件表」）
+     * - meta_json 含 ratio/duration/usage（视频特有参数）
+     * - size/quality/n 列填 null（视频不适用，messages 表允许 NULL）
+     *
+     * 注意：本方法不在内部开启事务，应由调用方通过 runTransaction 包裹，
+     * 以便与 clearReferenceImages / saveDraft 等操作原子化。
+     *
+     * @param {{ topicId: string; prompt: string; draft: object; videos: Array<object>; usage?: object|null }} payload
+     * @param {import('mysql2/promise').Pool|import('mysql2/promise').PoolConnection} executor 可选执行器
+     * @returns {Promise<object>} 创建的 assistant 消息对象
+     */
+    async saveVideoConversation({ topicId, prompt, draft, videos, usage }, executor = pool) {
+      const now = Date.now()
+      const userMessageId = createId()
+      const assistantMessageId = createId()
+      // 防御性处理：videos 可能为 undefined/null
+      const safeVideos = Array.isArray(videos) ? videos : []
+
+      await executor.query(
+        `INSERT INTO messages
+          (id, topic_id, type, role, content, prompt, revised_prompt, model, size, quality, n, status, source_message_id, meta_json, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          userMessageId,
+          topicId,
+          'user_prompt',
+          'user',
+          null,
+          prompt,
+          null,
+          draft.model || '',
+          null,
+          null,
+          null,
+          'done',
+          null,
+          JSON.stringify({
+            referenceCount: draft.referenceImages?.length || 0,
+            providerName: draft.providerName || '',
+            ratio: draft.ratio || '',
+            duration: draft.duration ?? null,
+          }),
+          now,
+        ],
+      )
+
+      await executor.query(
+        `INSERT INTO messages
+          (id, topic_id, type, role, content, prompt, revised_prompt, model, size, quality, n, status, source_message_id, meta_json, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          assistantMessageId,
+          topicId,
+          'assistant_videos',
+          'assistant',
+          null,
+          prompt,
+          null,
+          draft.model || '',
+          null,
+          null,
+          null,
+          'done',
+          draft.referenceImages?.[0]?.sourceMessageId || userMessageId,
+          JSON.stringify({
+            videoCount: safeVideos.length,
+            providerName: draft.providerName || '',
+            ratio: draft.ratio || '',
+            duration: draft.duration ?? null,
+            usage: usage || null,
+          }),
+          now + 1,
+        ],
+      )
+
+      // 视频元数据写入 message_images（mime_type 区分视频，listMessages 自动读入 images 数组）
+      for (const video of safeVideos) {
+        await executor.query(
+          `INSERT INTO message_images
+            (id, message_id, file_path, file_name, mime_type, width, height, saved_to_project, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [
+            createId(),
+            assistantMessageId,
+            video.localPath || video.url,
+            video.fileName || 'generated.mp4',
+            video.mimeType || 'video/mp4',
+            null,
+            null,
+            video.savedToProject ? 1 : 0,
+            now + 2,
+          ],
+        )
+      }
+
+      // 更新主题封面（取首个视频 url）、最近 prompt、消息计数、状态
+      await executor.query(
+        `UPDATE topics
+         SET cover_image_path = ?, last_prompt = ?, message_count = message_count + 2, status = ?, updated_at = ?
+         WHERE id = ?`,
+        [safeVideos.length ? safeVideos[0]?.url || null : null, prompt, 'idle', now + 3, topicId],
+      )
+
+      return {
+        id: assistantMessageId,
+        topicId,
+        type: 'assistant_videos',
+        role: 'assistant',
+        prompt,
+        videos: safeVideos,
+        // images 字段兼容：listMessages 把 message_images 行读入 images，前端按 type 路由
+        images: safeVideos,
+        model: draft.model || '',
+        ratio: draft.ratio || '',
+        duration: draft.duration ?? null,
+        sourceMessageId: draft.referenceImages?.[0]?.sourceMessageId || userMessageId,
+        createdAt: now + 1,
+      }
+    },
+
+    /**
      * 收集指定主题下所有需要清理的文件路径（生成图 + 参考图）
      *
      * 用于删除主题时事务后 best-effort 清理文件系统。

@@ -132,6 +132,16 @@ describe('SettingsModal 骨架', () => {
     expect(document.body.querySelector('[data-role="general-settings"]')).not.toBeNull()
   })
 
+  it('底部「默认参数」切换到默认参数视图', async () => {
+    mountModal()
+    await flushPromises()
+
+    document.body.querySelector('[data-action="open-defaults"]').click()
+    await flushPromises()
+
+    expect(document.body.querySelector('[data-role="default-params-settings"]')).not.toBeNull()
+  })
+
   it('底部「+ 添加」切换到新建视图，提交后创建并返回详情', async () => {
     api.createProvider.mockResolvedValue({
       id: 'custom-1',

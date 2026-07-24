@@ -59,6 +59,8 @@ function mapModelRow(row) {
     displayName: row.display_name,
     groupName: row.group_name,
     isImage: Boolean(row.is_image),
+    isVideo: Boolean(row.is_video),
+    modelType: row.model_type || 'other',
     enabled: Boolean(row.enabled),
     sortOrder: row.sort_order,
     createdAt: row.created_at,
@@ -86,12 +88,14 @@ export function createProvidersRepository(pool) {
       const providers = rows.map(mapProviderRow)
 
       const [modelRows] = await pool.query(
-        `SELECT provider_id, model_id, display_name FROM provider_models WHERE enabled = 1 ORDER BY sort_order ASC, created_at ASC`,
+        `SELECT provider_id, model_id, display_name, is_video, model_type FROM provider_models WHERE enabled = 1 ORDER BY sort_order ASC, created_at ASC`,
       )
       const byProvider = new Map()
       for (const m of modelRows) {
         if (!byProvider.has(m.provider_id)) byProvider.set(m.provider_id, [])
-        byProvider.get(m.provider_id).push({ modelId: m.model_id, displayName: m.display_name })
+        byProvider
+          .get(m.provider_id)
+          .push({ modelId: m.model_id, displayName: m.display_name, isVideo: Boolean(m.is_video), modelType: m.model_type || 'other' })
       }
       for (const p of providers) {
         p.enabledModels = byProvider.get(p.id) || []
@@ -216,9 +220,9 @@ export function createProvidersRepository(pool) {
     },
 
     /**
-     * 手动添加模型（默认启用，is_image 按关键词判断由调用方传入）
+     * 手动添加模型（默认启用，类型由调用方传入）
      * @param {string} providerId
-     * @param {{ modelId: string; displayName?: string; isImage?: boolean }} data
+     * @param {{ modelId: string; displayName?: string; isImage?: boolean; isVideo?: boolean; modelType?: string }} data
      * @returns {Promise<object>}
      */
     async addModel(providerId, data) {
@@ -226,8 +230,8 @@ export function createProvidersRepository(pool) {
         globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`
       await pool.query(
         `INSERT INTO provider_models
-          (id, provider_id, model_id, display_name, group_name, is_image, enabled, sort_order, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, 1, 999, ?)`,
+          (id, provider_id, model_id, display_name, group_name, is_image, is_video, model_type, enabled, sort_order, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 999, ?)`,
         [
           id,
           providerId,
@@ -235,6 +239,8 @@ export function createProvidersRepository(pool) {
           data.displayName || data.modelId,
           groupOfModel(data.modelId),
           data.isImage ? 1 : 0,
+          data.isVideo ? 1 : 0,
+          data.modelType || 'other',
           Date.now(),
         ],
       )
@@ -243,9 +249,9 @@ export function createProvidersRepository(pool) {
     },
 
     /**
-     * fetch 合并：新增行插入（图像模型默认启用），已存在行仅更新 display_name
+     * fetch 合并：新增行插入（全部 enabled=0，由用户手动启用），已存在行更新 display_name + model_type
      * @param {string} providerId
-     * @param {Array<{ modelId: string; displayName: string; isImage: boolean }>} models
+     * @param {Array<{ modelId: string; displayName: string; isImage: boolean; isVideo: boolean; modelType: string }>} models
      */
     async upsertFetchedModels(providerId, models) {
       const now = Date.now()
@@ -255,9 +261,9 @@ export function createProvidersRepository(pool) {
           `${now}-${index}-${Math.random().toString(16).slice(2)}`
         await pool.query(
           `INSERT INTO provider_models
-            (id, provider_id, model_id, display_name, group_name, is_image, enabled, sort_order, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-           ON DUPLICATE KEY UPDATE display_name = VALUES(display_name)`,
+            (id, provider_id, model_id, display_name, group_name, is_image, is_video, model_type, enabled, sort_order, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+           ON DUPLICATE KEY UPDATE display_name = VALUES(display_name), is_video = VALUES(is_video), model_type = VALUES(model_type)`,
           [
             id,
             providerId,
@@ -265,7 +271,8 @@ export function createProvidersRepository(pool) {
             m.displayName,
             groupOfModel(m.modelId),
             m.isImage ? 1 : 0,
-            m.isImage ? 1 : 0,
+            m.isVideo ? 1 : 0,
+            m.modelType || 'other',
             index,
             now,
           ],

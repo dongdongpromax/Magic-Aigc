@@ -44,6 +44,11 @@ export const useChatStore = defineStore('chat', () => {
     defaultSize: defaults.defaultSize,
     defaultQuality: defaults.defaultQuality,
     defaultN: defaults.defaultN,
+    // 视频模型默认参数（通用设置按模型类型分区持久化）
+    defaultRatio: defaults.defaultRatio,
+    defaultDuration: defaults.defaultDuration,
+    defaultResolution: defaults.defaultResolution,
+    defaultVideoRefMode: defaults.defaultVideoRefMode,
     timeout: defaults.timeout,
   })
 
@@ -72,6 +77,12 @@ export const useChatStore = defineStore('chat', () => {
     quality: appConfig.defaultQuality,
     n: appConfig.defaultN,
     referenceImages: [],
+    // 视频生成参数：默认值取自 appConfig（通用设置可配置），刷新回默认值（不持久化到 drafts 表）
+    ratio: appConfig.defaultRatio,
+    duration: appConfig.defaultDuration,
+    resolution: appConfig.defaultResolution,
+    // 视频参考模式（持久化到 drafts.video_ref_mode，与参考图同步防刷新错配）
+    videoRefMode: appConfig.defaultVideoRefMode,
   })
   /** @type {Map<string, ReturnType<typeof setTimeout>>} 草稿防抖定时器（按 topicId 索引） */
   const draftTimers = new Map()
@@ -102,7 +113,22 @@ export const useChatStore = defineStore('chat', () => {
       quality: appConfig.defaultQuality,
       n: appConfig.defaultN,
       referenceImages: [],
+      // 视频生成参数：默认值取自 appConfig（通用设置可配置），不持久化到 drafts 表
+      ratio: appConfig.defaultRatio,
+      duration: appConfig.defaultDuration,
+      resolution: appConfig.defaultResolution,
+      // 视频参考模式（持久化到 drafts.video_ref_mode，与参考图同步防刷新错配）
+      videoRefMode: appConfig.defaultVideoRefMode,
     }
+
+    // 后端 getDraft 不返回 ratio/duration/resolution（内存态不持久化），
+    // selectTopic/createTopic 会用后端返回值整体覆盖 drafts[topicId]，
+    // 导致这些字段变 undefined、n-select 显示空。此处兜底补默认值（取自 appConfig）。
+    if (drafts[topicId].ratio == null) drafts[topicId].ratio = appConfig.defaultRatio
+    if (drafts[topicId].duration == null) drafts[topicId].duration = appConfig.defaultDuration
+    if (drafts[topicId].resolution == null) drafts[topicId].resolution = appConfig.defaultResolution
+    // videoRefMode 后端会返回，但旧草稿可能为空，兜底防 undefined
+    if (drafts[topicId].videoRefMode == null) drafts[topicId].videoRefMode = appConfig.defaultVideoRefMode
 
     return drafts[topicId]
   }
@@ -324,8 +350,9 @@ export const useChatStore = defineStore('chat', () => {
         return
       }
 
-      // 截断到剩余配额，避免超限
+      // 仅登记图片为参考图：视频文件（mimeType video/*）不能作为首帧图片传给上游
       const imageIds = (message.images || [])
+        .filter((image) => image.mimeType?.startsWith('image/'))
         .slice(0, remain)
         .map((image) => image.id)
         .filter(Boolean)
@@ -381,6 +408,8 @@ export const useChatStore = defineStore('chat', () => {
       size: draft.size || appConfig.defaultSize,
       quality: draft.quality || appConfig.defaultQuality,
       n: draft.n || appConfig.defaultN,
+      // 视频参考模式持久化（与参考图同步，防刷新错配）
+      videoRefMode: draft.videoRefMode || 'first_frame',
     }
   }
 
@@ -427,6 +456,10 @@ export const useChatStore = defineStore('chat', () => {
         defaultN: appConfig.defaultN,
         requestMode: appConfig.requestMode,
         timeout: appConfig.timeout,
+        defaultRatio: appConfig.defaultRatio,
+        defaultDuration: appConfig.defaultDuration,
+        defaultResolution: appConfig.defaultResolution,
+        defaultVideoRefMode: appConfig.defaultVideoRefMode,
       })
       Object.assign(appConfig, saved)
       settingsSaveStatus.value = 'saved'
@@ -568,6 +601,120 @@ export const useChatStore = defineStore('chat', () => {
     lastError.value = readableError
   }
 
+  /**
+   * 视频生成完成后的处理：追加 assistant_videos 消息、更新主题
+   *
+   * 平行于 completeImageGeneration，区别：
+   * - 消息 type 为 'assistant_videos'
+   * - 不触发浏览器自动下载（视频文件大，体验差；用户可手动点下载按钮）
+   * - meta 含 ratio/duration/resolution
+   *
+   * @param {{ videos?: Array<object>; providerName?: string; ratio?: string; duration?: number; resolution?: string }} result 后端返回结果
+   * @param {string} prompt 用户 prompt
+   * @param {string} originTopicId 发起时的主题 ID（生成中切换主题后结果仍归位发起主题）
+   */
+  async function completeVideoGeneration(result, prompt, originTopicId = currentTopicId.value) {
+    // 绑定发起时的 originTopicId，生成中切换主题后结果仍正确归位发起主题
+    const topicId = originTopicId
+    const draft = ensureDraft(topicId)
+    const topic = getTopicById(topicId)
+    const latestGeneratingIndex = messages.value.findLastIndex(
+      (message) =>
+        message.topicId === topicId &&
+        message.type === 'system_status' &&
+        message.status === 'generating',
+    )
+
+    if (latestGeneratingIndex >= 0) {
+      messages.value.splice(latestGeneratingIndex, 1)
+    }
+
+    const videos = (result.videos || []).map((video) => ({
+      ...video,
+      localPath: video.localPath || '',
+      savedToProject: Boolean(video.localPath),
+    }))
+
+    messages.value.push({
+      id: createId(),
+      topicId,
+      type: 'assistant_videos',
+      role: 'assistant',
+      prompt,
+      videos,
+      // images 字段兼容：ChatArea/VideoMessageCard 可从 images 读取（reload 后从 message_images 表读出）
+      images: videos,
+      model: draft.model,
+      ratio: result.ratio || draft.ratio,
+      duration: result.duration ?? draft.duration,
+      resolution: result.resolution || draft.resolution,
+      // 视频参考模式写入消息体，供 retry 回填与卡片 meta 展示
+      videoRefMode: result.videoRefMode || draft.videoRefMode || 'first_frame',
+      sourceMessageId: draft.referenceImages[0]?.sourceMessageId || null,
+      meta: {
+        providerName: result.providerName || '',
+        ratio: result.ratio || draft.ratio,
+        duration: result.duration ?? draft.duration,
+        resolution: result.resolution || draft.resolution,
+        videoRefMode: result.videoRefMode || draft.videoRefMode || 'first_frame',
+      },
+      createdAt: Date.now(),
+    })
+
+    if (topic) {
+      topic.coverImage = videos?.[0]?.url || null
+      topic.lastPrompt = prompt
+      topic.updatedAt = Date.now()
+      topic.messageCount = messages.value.filter((message) => message.topicId === topicId).length
+      topic.status = 'idle'
+    }
+
+    draft.prompt = ''
+    draft.referenceImages = []
+    lastError.value = ''
+    scheduleDraftPersist(topicId)
+  }
+
+  /**
+   * 视频生成失败处理：移除 generating 状态消息，追加错误消息
+   * @param {Error} error
+   * @param {string} originTopicId 发起时的主题 ID
+   */
+  function failVideoGeneration(error, originTopicId = currentTopicId.value) {
+    // 绑定发起时的 originTopicId，失败消息归位发起主题
+    const topicId = originTopicId
+    const readableError = getReadableError(error, '视频生成失败，请检查中转站配置')
+    const latestGeneratingIndex = messages.value.findLastIndex(
+      (message) =>
+        message.topicId === topicId &&
+        message.type === 'system_status' &&
+        message.status === 'generating',
+    )
+
+    if (latestGeneratingIndex >= 0) {
+      messages.value.splice(latestGeneratingIndex, 1)
+    }
+
+    messages.value.push({
+      id: createId(),
+      topicId,
+      type: 'assistant_text',
+      role: 'assistant',
+      content: readableError,
+      createdAt: Date.now(),
+    })
+
+    const topic = getTopicById(topicId)
+
+    if (topic) {
+      topic.updatedAt = Date.now()
+      topic.messageCount = messages.value.filter((message) => message.topicId === topicId).length
+      topic.status = 'error'
+    }
+
+    lastError.value = readableError
+  }
+
   function openSettings() {
     settingsVisible.value = true
   }
@@ -600,9 +747,9 @@ export const useChatStore = defineStore('chat', () => {
    * @param {Error} error
    * @returns {string}
    */
-  function getReadableError(error) {
+  function getReadableError(error, fallback = '图像生成失败，请检查中转站配置') {
     return (
-      error?.response?.data?.message || error?.response?.data?.error?.message || error?.message || '图像生成失败，请检查中转站配置'
+      error?.response?.data?.message || error?.response?.data?.error?.message || error?.message || fallback
     )
   }
 
@@ -652,6 +799,8 @@ export const useChatStore = defineStore('chat', () => {
     removeReferenceImage,
     completeImageGeneration,
     failImageGeneration,
+    completeVideoGeneration,
+    failVideoGeneration,
     saveSettings,
     toggleChatFullscreen,
     openSettings,

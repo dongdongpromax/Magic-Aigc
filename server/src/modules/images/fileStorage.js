@@ -69,6 +69,22 @@ export function createFileStorage({ rootDir }) {
     },
 
     /**
+     * 保存生成的二进制文件（视频等非文本媒体）
+     *
+     * 视频生成任务完成后，上游返回的 video_url 是 24h 有效的预签名链接，
+     * 必须下载并以 Buffer 形式落盘到本地，刷新后仍可访问。
+     *
+     * @param {string} fileName 文件名（含扩展名，如 xxx.mp4）
+     * @param {Buffer} buffer 二进制数据
+     * @returns {Promise<string>} 可访问路径 /files/generated/{fileName}
+     */
+    async writeGeneratedBuffer(fileName, buffer) {
+      const absolutePath = path.join(generatedDir, fileName)
+      await fs.writeFile(absolutePath, buffer)
+      return `/files/generated/${fileName}`
+    },
+
+    /**
      * 读取文件并转为 data URL（用于发送给 OpenRouter）
      * @param {string} filePath 文件路径（/files/... 形式）
      * @param {string} mimeType MIME 类型

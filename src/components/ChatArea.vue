@@ -5,6 +5,7 @@ import { useChatStore } from '@/store/chat'
 import { triggerBrowserDownload } from '@/utils/download'
 import ConnectionBadge from './ConnectionBadge.vue'
 import ImageMessageCard from './ImageMessageCard.vue'
+import VideoMessageCard from './VideoMessageCard.vue'
 import InputConsole from './InputConsole.vue'
 import MessageBubble from './MessageBubble.vue'
 import SettingsModal from './settings/SettingsModal.vue'
@@ -21,13 +22,18 @@ const currentMessages = computed(() => {
  * 参考图通过 chatStore.addReferenceFromMessage 持久化到后端 draft_reference_images 表，
  * 不再直接修改本地状态导致刷新丢失。
  *
- * @param {{ id: string; prompt?: string; images?: Array<object> }} message 历史消息
+ * 视频消息的 images 全是 video/mp4，不能作为首帧参考图（addReferenceFromMessage 会
+ * 过滤 image/* 并误报「该消息没有可设为参考图的图片」），因此视频消息只回填 prompt。
+ *
+ * @param {{ id: string; type: string; prompt?: string; images?: Array<object> }} message 历史消息
  */
 const handleRefine = async (message) => {
   // 先把 prompt 回填到草稿（细化的起点）
   if (message.prompt) {
     chatStore.currentDraft.prompt = message.prompt
   }
+  // 视频消息没有可设为参考图的图片，跳过避免误报错误
+  if (message.type === 'assistant_videos') return
   // 参考图走后端持久化
   await chatStore.addReferenceFromMessage(message)
 }
@@ -39,9 +45,17 @@ const handleRetry = (message) => {
   const draft = chatStore.currentDraft
   draft.prompt = message.prompt || ''
   draft.model = message.model || draft.model
-  draft.size = message.size || draft.size
-  draft.quality = message.quality || draft.quality
-  draft.n = message.n || draft.n
+  if (message.type === 'assistant_videos') {
+    // 视频消息回填 ratio/duration/resolution/videoRefMode（替代图像的 size/quality/n）
+    draft.ratio = message.ratio || message.meta?.ratio || draft.ratio
+    draft.duration = message.duration ?? message.meta?.duration ?? draft.duration
+    draft.resolution = message.resolution || message.meta?.resolution || draft.resolution
+    draft.videoRefMode = message.videoRefMode || message.meta?.videoRefMode || draft.videoRefMode
+  } else {
+    draft.size = message.size || draft.size
+    draft.quality = message.quality || draft.quality
+    draft.n = message.n || draft.n
+  }
 }
 
 /**
@@ -61,6 +75,20 @@ const handleDownload = async (message) => {
   triggerBrowserDownload({
     dataUrl: image.url,
     fileName: `${chatStore.currentTopicId || 'image'}-${Date.now()}.png`,
+  })
+}
+
+/**
+ * 下载视频
+ * 取首个视频 url（/files/generated/xxx.mp4 形式），触发浏览器下载
+ */
+const handleDownloadVideo = async (message) => {
+  const video = message.videos?.[0] || message.images?.find((i) => i.mimeType?.startsWith('video/'))
+  if (!video?.url) return
+
+  triggerBrowserDownload({
+    dataUrl: video.url,
+    fileName: `${chatStore.currentTopicId || 'video'}-${Date.now()}.mp4`,
   })
 }
 
@@ -113,13 +141,20 @@ onBeforeUnmount(() => {
           @reference="handleReference"
           @download="handleDownload"
         />
+        <VideoMessageCard
+          v-else-if="message.type === 'assistant_videos'"
+          :message="message"
+          @refine="handleRefine"
+          @retry="handleRetry"
+          @download="handleDownloadVideo"
+        />
         <MessageBubble v-else :message="message" />
       </template>
     </div>
 
     <div class="empty-state" v-else>
       <div class="empty-copy">
-        <h1>开始与 GPT Image-2 一起创作</h1>
+        <h1>开始视觉创作</h1>
         <p>输入一句要求，或先设置参考图、尺寸与生成张数。</p>
       </div>
     </div>

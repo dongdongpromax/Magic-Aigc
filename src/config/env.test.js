@@ -18,6 +18,11 @@ describe('getDefaultAppConfig', () => {
       defaultSize: 'auto',
       defaultQuality: 'high',
       defaultN: 1,
+      // 视频模型默认参数（与后端 settingsRepository 默认值对齐）
+      defaultRatio: '16:9',
+      defaultDuration: 5,
+      defaultResolution: '720p',
+      defaultVideoRefMode: 'first_frame',
       timeout: 90000,
     })
   })

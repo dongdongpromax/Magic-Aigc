@@ -8,13 +8,19 @@ import { createSettingsRepository } from './db/repositories/settingsRepository.j
 import { createTopicRepository } from './db/repositories/topicRepository.js'
 import { createDraftRepository } from './db/repositories/draftRepository.js'
 import { verifyDatabaseConnection } from './db/init.js'
-import { migrateProvidersSchema, seedProvidersIfEmpty } from './db/seedProviders.js'
+import {
+  migrateProvidersSchema,
+  seedProvidersIfEmpty,
+  upsertPresetProvider,
+  PRESET_PROVIDERS,
+} from './db/seedProviders.js'
 import { createProvidersRepository } from './db/repositories/providersRepository.js'
 import { runTransaction } from './db/transaction.js'
 import { createFileStorage } from './modules/images/fileStorage.js'
 import { createUpstreamClient } from './modules/providers/upstreamClient.js'
 import { createProvidersService } from './modules/providers/providersService.js'
 import { buildImagePayload } from './modules/providers/imagePayload.js'
+import { createVideoService } from './modules/videos/videoService.js'
 
 const env = getServerEnv()
 const pool = createPool(env)
@@ -92,6 +98,9 @@ const settingsRepository = createSettingsRepository(pool)
 // providers 迁移与首次 seed（幂等）；失败不阻断启动，API 调用时会再次暴露问题
 try {
   await migrateProvidersSchema(pool)
+  // 幂等 upsert 火山引擎预设（让旧部署也拿到火山方舟中转站，不影响已存在记录的 enabled/api_keys）
+  const volcPreset = PRESET_PROVIDERS.find((p) => p.id === 'volcengine')
+  if (volcPreset) await upsertPresetProvider(pool, volcPreset)
   const legacy = await settingsRepository.getSettings()
   await seedProvidersIfEmpty(pool, {
     envApiKey: env.openrouterApiKey,
@@ -114,11 +123,24 @@ const providersService = createProvidersService({
   settingsRepository,
 })
 
+// 视频生成服务：编排火山 Seedance 异步任务（创建 → 轮询 → 下载落盘 → 事务保存）
+const videoService = createVideoService({
+  providersService,
+  upstreamClient,
+  fileStorage,
+  topicRepository,
+  draftRepository,
+  pool,
+  runTransaction,
+  storageRoot,
+})
+
 const app = createApp({
   settingsRepository,
   topicRepository,
   draftRepository,
   providersService,
+  videoService,
   // P1-6: 健康检查注入，/api/health 会调用此函数探测 DB
   healthCheck: async () => verifyDatabaseConnection(pool),
   imageService: {

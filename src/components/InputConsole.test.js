@@ -5,11 +5,16 @@ import { NSelect } from 'naive-ui'
 import InputConsole from './InputConsole.vue'
 import { useChatStore } from '@/store/chat'
 import { requestImages } from '@/services/imageSession'
+import { requestVideo } from '@/services/videoSession'
 import { useProvidersStore } from '@/store/providers'
 import * as uploadApiModule from '@/services/uploadApi'
 
 vi.mock('@/services/imageSession', () => ({
   requestImages: vi.fn(),
+}))
+
+vi.mock('@/services/videoSession', () => ({
+  requestVideo: vi.fn(),
 }))
 
 /**
@@ -45,6 +50,8 @@ describe('InputConsole', () => {
   beforeEach(() => {
     localStorage.clear()
     vi.restoreAllMocks()
+    // ConfirmDialog 通过 Teleport 挂到 body，测试间清理避免串扰
+    document.body.innerHTML = ''
   })
 
   it('将输入同步到当前草稿并启用发送按钮', async () => {
@@ -68,10 +75,11 @@ describe('InputConsole', () => {
     expect(store.currentDraft.prompt).toBe('生成一张冷银色机械大厅')
     expect(sendButton.attributes('disabled')).toBeUndefined()
     expect(wrapper.find('select').exists()).toBe(false)
-    expect(wrapper.findAll('.n-base-selection')).toHaveLength(2)
+    // 参数面板未展开时只有模型选择器 1 个 NSelect（张数/比例等收纳在面板内）
+    expect(wrapper.findAll('.n-base-selection')).toHaveLength(1)
   })
 
-  it('点击尺寸触发器后显示网格弹层', async () => {
+  it('点击参数按钮展开面板，显示尺寸网格与张数选择器', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     seedProviders()
@@ -82,21 +90,105 @@ describe('InputConsole', () => {
       },
     })
 
-    await wrapper.get('[data-action="open-size-grid"]').trigger('click')
+    const store = useChatStore()
+    // 未选模型时参数按钮不显示，先选中图像模型
+    store.currentDraft.providerId = 'openrouter'
+    store.currentDraft.model = 'openai/gpt-image-2'
+    await flushPromises()
 
+    // 点击参数按钮展开面板
+    await wrapper.get('[data-action="open-params"]').trigger('click')
+
+    // 参数面板容器存在且朝上弹出
+    expect(wrapper.find('[data-panel="params"]').exists()).toBe(true)
+    expect(wrapper.get('[data-panel="params"]').attributes('data-placement')).toBe('top')
+    // 面板内含尺寸网格
     expect(wrapper.find('[data-panel="size-grid"]').exists()).toBe(true)
-    expect(wrapper.get('[data-panel="size-grid"]').attributes('data-placement')).toBe('top')
-    expect(wrapper.text()).toContain('auto')
+    expect(wrapper.text()).toContain('自动')
     expect(wrapper.text()).toContain('1:1')
     expect(wrapper.text()).toContain('1024×1024')
     expect(wrapper.text()).toContain('16:9')
     expect(wrapper.text()).toContain('1536×864')
+    // 展开后 NSelect = 模型选择器（张数改分段按钮）
+    expect(wrapper.findAllComponents(NSelect)).toHaveLength(1)
+  })
+
+  it('参数按钮显示当前参数摘要文案', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    seedProviders()
+
+    const wrapper = mount(InputConsole, {
+      global: { plugins: [pinia] },
+    })
+    const store = useChatStore()
+
+    // 选中图像模型后参数按钮才显示
+    store.currentDraft.providerId = 'openrouter'
+    store.currentDraft.model = 'openai/gpt-image-2'
+    // 图像模式默认：尺寸 auto + 张数 1
+    store.currentDraft.size = 'auto'
+    store.currentDraft.n = 1
+    await flushPromises()
+    const paramBtn = wrapper.find('[data-action="open-params"]')
+    expect(paramBtn.text()).toContain('自动')
+    expect(paramBtn.text()).toContain('1张')
+
+    // 切换尺寸后摘要同步更新
+    store.currentDraft.size = '1536x864'
+    store.currentDraft.n = 3
+    await flushPromises()
+    expect(paramBtn.text()).toContain('16:9')
+    expect(paramBtn.text()).toContain('3张')
+  })
+
+  it('视频模式参数面板显示比例/时长/清晰度', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+
+    // 注入含视频模型的中转站
+    const providersStore = useProvidersStore()
+    providersStore.providers = [
+      {
+        id: 'volcengine',
+        name: '火山方舟',
+        color: '#ff6b35',
+        enabled: true,
+        apiKeys: ['sk-vol'],
+        enabledModels: [
+          { modelId: 'seedance-1-0', displayName: 'Seedance 1.0', isVideo: true },
+        ],
+      },
+    ]
+
+    const wrapper = mount(InputConsole, {
+      global: { plugins: [pinia] },
+    })
+    const store = useChatStore()
+    store.currentDraft.providerId = 'volcengine'
+    store.currentDraft.model = 'seedance-1-0'
+    await flushPromises()
+
+    // 视频模式摘要包含比例和清晰度
+    const paramBtn = wrapper.find('[data-action="open-params"]')
+    expect(paramBtn.text()).toContain('16:9')
+    expect(paramBtn.text()).toContain('720p')
+
+    // 展开面板显示视频参数控件
+    await paramBtn.trigger('click')
+    expect(wrapper.find('[data-panel="params"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('参考模式')
+    expect(wrapper.text()).toContain('比例')
+    expect(wrapper.text()).toContain('时长')
+    expect(wrapper.text()).toContain('清晰度')
+    // 展开后 NSelect = 模型 + 时长 = 2（参考模式/比例/清晰度改分段按钮）
     expect(wrapper.findAllComponents(NSelect)).toHaveLength(2)
   })
 
   it('上传超过 16 张参考图时显示上限提示', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
+    seedProviders()
 
     const wrapper = mount(InputConsole, {
       global: {
@@ -105,6 +197,10 @@ describe('InputConsole', () => {
     })
 
     const store = useChatStore()
+    // 选中图像模型后参考图上传按钮才显示
+    store.currentDraft.providerId = 'openrouter'
+    store.currentDraft.model = 'openai/gpt-image-2'
+    await flushPromises()
     store.addReferenceImages(
       Array.from({ length: 16 }).map((_, index) => ({
         id: `ref-${index}`,
@@ -126,7 +222,11 @@ describe('InputConsole', () => {
 
     await input.trigger('change')
 
-    expect(wrapper.text()).toContain('最多上传 16 张参考图')
+    // 已满 16 张时上传被截断；按钮角标显示 16/16，完整提示移到 title
+    const uploadTrigger = wrapper.find('.upload-trigger')
+    expect(wrapper.text()).toContain('16/16')
+    expect(uploadTrigger.attributes('title')).toContain('已添加 16 / 16 张参考图')
+    expect(store.currentDraft.referenceImages).toHaveLength(16)
   })
 
   it('显示参考图缩略条并支持移除单张', async () => {
@@ -161,6 +261,7 @@ describe('InputConsole', () => {
   it('上传参考图时调用后端上传接口并写入当前草稿', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
+    seedProviders()
 
     const wrapper = mount(InputConsole, {
       global: {
@@ -169,6 +270,8 @@ describe('InputConsole', () => {
     })
 
     const store = useChatStore()
+    store.currentDraft.providerId = 'openrouter'
+    store.currentDraft.model = 'openai/gpt-image-2'
     vi.spyOn(store, 'createTopic').mockResolvedValue('topic-1')
     vi.spyOn(uploadApiModule, 'uploadReferenceImages').mockResolvedValue([
       {
@@ -179,6 +282,8 @@ describe('InputConsole', () => {
         sourceMessageId: null,
       },
     ])
+
+    await flushPromises()
 
     const file = new File(['demo'], 'scene.png', { type: 'image/png' })
     const input = wrapper.get('[data-action="add-reference"]')
@@ -366,5 +471,184 @@ describe('InputConsole', () => {
         }),
       }),
     )
+  })
+
+  it('Shift+Enter 不触发发送（放行换行），且不弹确认框', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    seedProviders()
+
+    const wrapper = mount(InputConsole, { global: { plugins: [pinia] } })
+    const store = useChatStore()
+    requestImages.mockResolvedValue({ images: [], revisedPrompt: '' })
+
+    store.currentDraft.providerId = 'openrouter'
+    store.currentDraft.model = 'openai/gpt-image-2'
+    await wrapper.find('textarea').setValue('画一只猫')
+
+    // Shift+Enter：默认换行，不应发送、不应弹确认
+    await wrapper.find('textarea').trigger('keydown', { key: 'Enter', shiftKey: true })
+    await flushPromises()
+
+    expect(requestImages).not.toHaveBeenCalled()
+    // Teleport 在测试中被 stub（见 setup.js），内容原地渲染，用 wrapper 查询
+    expect(wrapper.find('[data-role="confirm-dialog"]').exists()).toBe(false)
+  })
+
+  it('Enter 弹出提交确认，确认后才发送', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    seedProviders()
+
+    const wrapper = mount(InputConsole, { global: { plugins: [pinia] } })
+    const store = useChatStore()
+    vi.spyOn(store, 'addUserPrompt').mockResolvedValue('topic-1')
+    vi.spyOn(store, 'completeImageGeneration').mockResolvedValue()
+    requestImages.mockResolvedValue({ images: [], revisedPrompt: '' })
+
+    store.currentDraft.providerId = 'openrouter'
+    store.currentDraft.model = 'openai/gpt-image-2'
+    await wrapper.find('textarea').setValue('画一只猫')
+
+    // Enter：弹确认框，尚未发送
+    await wrapper.find('textarea').trigger('keydown', { key: 'Enter', shiftKey: false })
+    await flushPromises()
+
+    // Teleport 在测试中被 stub，内容原地渲染，用 wrapper 查询
+    expect(wrapper.find('[data-role="confirm-dialog"]').exists()).toBe(true)
+    expect(requestImages).not.toHaveBeenCalled()
+
+    // 点击「确定提交」后才发送
+    await wrapper.find('[data-action="confirm-confirm"]').trigger('click')
+    await flushPromises()
+
+    expect(requestImages).toHaveBeenCalledWith(
+      'topic-1',
+      expect.objectContaining({
+        draft: expect.objectContaining({ providerId: 'openrouter', model: 'openai/gpt-image-2' }),
+      }),
+    )
+  })
+
+  it('Enter 提交确认取消时不发送', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    seedProviders()
+
+    const wrapper = mount(InputConsole, { global: { plugins: [pinia] } })
+    const store = useChatStore()
+    requestImages.mockResolvedValue({ images: [], revisedPrompt: '' })
+
+    store.currentDraft.providerId = 'openrouter'
+    store.currentDraft.model = 'openai/gpt-image-2'
+    await wrapper.find('textarea').setValue('画一只猫')
+
+    await wrapper.find('textarea').trigger('keydown', { key: 'Enter', shiftKey: false })
+    await flushPromises()
+
+    // 点击「取消」
+    await wrapper.find('[data-action="confirm-cancel"]').trigger('click')
+    await flushPromises()
+
+    expect(requestImages).not.toHaveBeenCalled()
+  })
+
+  it('视频参数面板含参考模式选择器，默认首帧', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const providersStore = useProvidersStore()
+    providersStore.providers = [
+      {
+        id: 'volcengine',
+        name: '火山方舟',
+        color: '#ff6b35',
+        enabled: true,
+        apiKeys: ['sk'],
+        enabledModels: [{ modelId: 'seedance-1-0', displayName: 'Seedance 1.0', isVideo: true }],
+      },
+    ]
+    const wrapper = mount(InputConsole, { global: { plugins: [pinia] } })
+    const store = useChatStore()
+    store.currentDraft.providerId = 'volcengine'
+    store.currentDraft.model = 'seedance-1-0'
+    await flushPromises()
+
+    await wrapper.get('[data-action="open-params"]').trigger('click')
+    expect(wrapper.text()).toContain('参考模式')
+    expect(store.currentDraft.videoRefMode).toBe('first_frame')
+  })
+
+  it('首尾帧模式渲染 2 个带标签卡槽，多图参考渐进式显示添加入口', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const providersStore = useProvidersStore()
+    providersStore.providers = [
+      {
+        id: 'volcengine',
+        name: '火山方舟',
+        color: '#ff6b35',
+        enabled: true,
+        apiKeys: ['sk'],
+        enabledModels: [{ modelId: 'seedance-1-0', displayName: 'Seedance 1.0', isVideo: true }],
+      },
+    ]
+    const wrapper = mount(InputConsole, { global: { plugins: [pinia] } })
+    const store = useChatStore()
+    store.currentDraft.providerId = 'volcengine'
+    store.currentDraft.model = 'seedance-1-0'
+    store.currentDraft.videoRefMode = 'first_last'
+    await flushPromises()
+
+    // 首尾帧：2 个卡槽，含「首帧」「尾帧」标签
+    expect(wrapper.findAll('[data-role="ref-slot"]')).toHaveLength(2)
+    expect(wrapper.text()).toContain('首帧')
+    expect(wrapper.text()).toContain('尾帧')
+
+    // 切多图参考：空状态只显示 1 个添加入口，不铺满 9 槽
+    store.currentDraft.videoRefMode = 'reference'
+    await flushPromises()
+    expect(wrapper.findAll('[data-role="ref-slot"]')).toHaveLength(1)
+
+    // 上传 2 张后：2 个满槽 + 1 个添加入口 = 3
+    store.currentDraft.referenceImages = [
+      { id: 'r1', name: 'a.png', type: 'image/png', url: '/files/a.png' },
+      { id: 'r2', name: 'b.png', type: 'image/png', url: '/files/b.png' },
+    ]
+    await flushPromises()
+    expect(wrapper.findAll('[data-role="ref-slot"]')).toHaveLength(3)
+  })
+
+  it('首尾帧模式未填满两槽时阻止发送并提示', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const providersStore = useProvidersStore()
+    providersStore.providers = [
+      {
+        id: 'volcengine',
+        name: '火山方舟',
+        color: '#ff6b35',
+        enabled: true,
+        apiKeys: ['sk'],
+        enabledModels: [{ modelId: 'seedance-1-0', displayName: 'Seedance 1.0', isVideo: true }],
+      },
+    ]
+    const wrapper = mount(InputConsole, { global: { plugins: [pinia] } })
+    const store = useChatStore()
+    store.currentDraft.providerId = 'volcengine'
+    store.currentDraft.model = 'seedance-1-0'
+    store.currentDraft.videoRefMode = 'first_last'
+    store.currentDraft.prompt = '动起来'
+    // 只塞 1 张图（首帧有、尾帧空）
+    store.currentDraft.referenceImages = [
+      { id: 'r1', name: 'a.png', type: 'image/png', url: '/files/a.png' },
+    ]
+    await flushPromises()
+
+    requestVideo.mockReset()
+    await wrapper.find('.send-btn').trigger('click')
+    await flushPromises()
+
+    expect(store.lastError).toContain('首尾帧')
+    expect(requestVideo).not.toHaveBeenCalled()
   })
 })

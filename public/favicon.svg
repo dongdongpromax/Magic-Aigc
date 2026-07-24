@@ -1,43 +1,27 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
   <!--
-    AI Chat Draw 图标
-    意象：圆角画布（绘图）+ 中央 AI 四角星 sparkle（AI 生成）+ 右下对话气泡（对话式）
-    配色：靛蓝 → 紫罗兰渐变，呼应项目原 accent 色系
+    创作工坊图标
+    意象：光圈（镜头/视觉），覆盖图像与视频两大视觉创作形态
+    配色：靛蓝纯色底 + 白色光圈线条，干练不 AI 感
   -->
-  <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#6366f1" />
-      <stop offset="1" stop-color="#a855f7" />
-    </linearGradient>
-    <linearGradient id="sparkle" x1="14" y1="10" x2="48" y2="44" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#ffffff" />
-      <stop offset="1" stop-color="#ddd6fe" />
-    </linearGradient>
-    <linearGradient id="bubble" x1="34" y1="40" x2="54" y2="54" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#ffffff" />
-      <stop offset="1" stop-color="#e0e7ff" />
-    </linearGradient>
-  </defs>
+  <!-- 圆角方形底板（纯色，无渐变） -->
+  <rect width="64" height="64" rx="14" fill="#6366f1" />
 
-  <!-- 圆角方形画布背景 -->
-  <rect width="64" height="64" rx="15" fill="url(#bg)" />
-
-  <!-- 中央四角星 sparkle（AI 生成魔法） -->
-  <path
-    d="M30 9 L33.8 22.2 L47 26 L33.8 29.8 L30 43 L26.2 29.8 L13 26 L26.2 22.2 Z"
-    fill="url(#sparkle)"
-  />
-
-  <!-- 小 sparkle 装饰（增强 AI 感） -->
-  <path
-    d="M19 42 L20.4 45.6 L24 47 L20.4 48.4 L19 52 L17.6 48.4 L14 47 L17.6 45.6 Z"
-    fill="#ffffff"
-    opacity="0.75"
-  />
-
-  <!-- 右下对话气泡（对话式交互） -->
-  <path
-    d="M42 39 C46.4 39 50 41.6 50 45 C50 48.4 46.4 51 42 51 C41 51 40 50.9 39.1 50.6 L34 53.5 L35.7 49.4 C34 48.1 33.4 46.6 33.4 45 C33.4 41.6 37.6 39 42 39 Z"
-    fill="url(#bubble)"
-  />
+  <!-- 中央光圈线条（视觉/镜头意象） -->
+  <g
+    transform="translate(7 7) scale(2.083)"
+    stroke="#ffffff"
+    stroke-width="1.6"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    fill="none"
+  >
+    <circle cx="12" cy="12" r="10" />
+    <path d="m14.31 8 5.74 9.94" />
+    <path d="M9.69 8h11.48" />
+    <path d="m7.38 12 5.74-9.94" />
+    <path d="M9.69 16 3.95 6.06" />
+    <path d="M14.31 16H2.83" />
+    <path d="m16.62 12-5.74 9.94" />
+  </g>
 </svg>

@@ -64,6 +64,8 @@ describe('providersRepository', () => {
             provider_id: 'openrouter',
             model_id: 'openai/gpt-image-2',
             display_name: 'GPT Image 2',
+            is_video: 0,
+            model_type: 'image',
           },
         ],
       ],
@@ -72,8 +74,9 @@ describe('providersRepository', () => {
 
     const list = await repo.listProviders()
 
+    // 简表携带 isVideo 标记和 modelType 类型，供前端识别视频模型切换参数面板 + 渲染 tag
     expect(list[0].enabledModels).toEqual([
-      { modelId: 'openai/gpt-image-2', displayName: 'GPT Image 2' },
+      { modelId: 'openai/gpt-image-2', displayName: 'GPT Image 2', isVideo: false, modelType: 'image' },
     ])
   })
 
@@ -150,22 +153,25 @@ describe('providersRepository', () => {
     expect(deletes[1].sql).toContain('providers')
   })
 
-  it('upsertFetchedModels 新增行标记 is_image/enabled，已存在行仅更新 display_name', async () => {
+  it('upsertFetchedModels 新增行全部 enabled=0（需手动启用），已存在行不触碰 enabled', async () => {
     const pool = createMockPool()
     const repo = createProvidersRepository(pool)
 
     await repo.upsertFetchedModels('openrouter', [
-      { modelId: 'openai/gpt-image-2', displayName: 'GPT Image 2', isImage: true },
-      { modelId: 'openai/gpt-4o', displayName: 'GPT-4o', isImage: false },
+      { modelId: 'openai/gpt-image-2', displayName: 'GPT Image 2', isImage: true, isVideo: false, modelType: 'image' },
+      { modelId: 'openai/gpt-4o', displayName: 'GPT-4o', isImage: false, isVideo: false, modelType: 'text' },
     ])
 
     const upserts = pool.calls.filter((c) => /INSERT INTO provider_models/.test(c.sql))
     expect(upserts).toHaveLength(2)
-    // ON DUPLICATE KEY UPDATE 只更新 display_name，不触碰 enabled（保留用户开关）
+    // ON DUPLICATE KEY UPDATE 只更新 display_name/is_video/model_type，不触碰 enabled（保留用户开关）
     expect(upserts[0].sql).toContain('ON DUPLICATE KEY UPDATE display_name = VALUES(display_name)')
-    // 图像模型 enabled=1，文本模型 enabled=0
-    expect(upserts[0].params).toContain(1)
-    expect(upserts[1].params).toContain(0)
+    expect(upserts[0].sql).not.toMatch(/UPDATE.*enabled/)
+    // 新增行 enabled 硬编码为 0（VALUES 第 9 个占位符），所有模型均需手动启用
+    expect(upserts[0].sql).toContain('?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)')
+    // 图像模型 is_image=1，文本模型 is_image=0
+    expect(upserts[0].params[5]).toBe(1)
+    expect(upserts[1].params[5]).toBe(0)
   })
 
   it('setModelEnabled / deleteModel 按 provider+model 定位', async () => {

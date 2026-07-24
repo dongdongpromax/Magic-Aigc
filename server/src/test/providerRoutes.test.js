@@ -1,7 +1,7 @@
 import request from 'supertest'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createApp } from '../app.js'
-import { isImageModelId } from '../modules/providers/providersService.js'
+import { detectModelType, isImageModelId } from '../modules/providers/providersService.js'
 import { buildImagePayload } from '../modules/providers/imagePayload.js'
 
 /** 内存版 providersService 假实现 */
@@ -45,7 +45,6 @@ function createFakeService() {
       added: 2,
       updated: 1,
       total: 3,
-      autoEnabled: 1,
       staleModelIds: [],
     })),
     addModel: vi.fn(async (pid, data) => ({ modelId: data.modelId, enabled: true })),
@@ -125,7 +124,7 @@ describe('providerRoutes', () => {
   it('POST /api/providers/:id/models/fetch 返回合并统计', async () => {
     const res = await request(app).post('/api/providers/openrouter/models/fetch')
     expect(res.status).toBe(200)
-    expect(res.body).toMatchObject({ added: 2, autoEnabled: 1 })
+    expect(res.body).toMatchObject({ added: 2, total: 3 })
   })
 
   it('POST /api/providers/:id/models 手动添加模型（缺 modelId 400）', async () => {
@@ -171,6 +170,38 @@ describe('isImageModelId', () => {
     expect(isImageModelId('openai/gpt-4o')).toBe(false)
     expect(isImageModelId('anthropic/claude-sonnet-4')).toBe(false)
     expect(isImageModelId('deepseek/deepseek-chat')).toBe(false)
+  })
+})
+
+describe('detectModelType', () => {
+  it('视频模型优先级最高（即使 ID 含 image 也归 video）', () => {
+    expect(detectModelType('bytedance/seedance-1-0')).toBe('video')
+    expect(detectModelType('wanx2.1-t2v-turbo')).toBe('video')
+    expect(detectModelType('cogvideox-5b')).toBe('video')
+  })
+
+  it('图像模型识别', () => {
+    expect(detectModelType('openai/gpt-image-2')).toBe('image')
+    expect(detectModelType('black-forest-labs/flux-1.1-pro')).toBe('image')
+    expect(detectModelType('bytedance/seedream-4')).toBe('image')
+  })
+
+  it('嵌入模型识别', () => {
+    expect(detectModelType('text-embedding-3-large')).toBe('embedding')
+    expect(detectModelType('bge-m3')).toBe('embedding')
+    expect(detectModelType('e5-large-v2')).toBe('embedding')
+  })
+
+  it('语音模型识别', () => {
+    expect(detectModelType('tts-1')).toBe('audio')
+    expect(detectModelType('whisper-1')).toBe('audio')
+    expect(detectModelType('bark')).toBe('audio')
+  })
+
+  it('未命中关键词的模型兜底为 text', () => {
+    expect(detectModelType('openai/gpt-4o')).toBe('text')
+    expect(detectModelType('anthropic/claude-sonnet-4')).toBe('text')
+    expect(detectModelType('deepseek/deepseek-chat')).toBe('text')
   })
 })
 

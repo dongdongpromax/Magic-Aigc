@@ -323,4 +323,121 @@ describe('chat store', () => {
     const assistant = store.currentMessages.find((m) => m.type === 'assistant_images')
     expect(assistant.meta.providerName).toBe('硅基流动')
   })
+
+  it('completeVideoGeneration 追加 assistant_videos 消息并写入 ratio/duration/providerName', async () => {
+    const store = useChatStore()
+    await store.createTopic('海报概念')
+    await store.addUserPrompt('一只猫奔跑')
+
+    await store.completeVideoGeneration(
+      {
+        videos: [{ url: '/files/generated/demo.mp4', localPath: '/files/generated/demo.mp4' }],
+        providerName: '火山方舟',
+        ratio: '16:9',
+        duration: 5,
+      },
+      '一只猫奔跑',
+    )
+
+    const assistant = store.currentMessages.find((m) => m.type === 'assistant_videos')
+    expect(assistant).toBeTruthy()
+    expect(assistant.videos).toHaveLength(1)
+    // images 兼容字段同步，便于 VideoMessageCard 兜底读取
+    expect(assistant.images).toEqual(assistant.videos)
+    expect(assistant.meta).toMatchObject({ providerName: '火山方舟', ratio: '16:9', duration: 5 })
+    expect(assistant.ratio).toBe('16:9')
+    expect(assistant.duration).toBe(5)
+  })
+
+  it('failVideoGeneration 移除 generating 状态并追加可读错误消息', async () => {
+    const store = useChatStore()
+    await store.createTopic('海报概念')
+    await store.addUserPrompt('一只猫奔跑')
+
+    const err = new Error('视频生成失败：内容不合规')
+    store.failVideoGeneration(err)
+
+    // generating 状态消息被移除
+    expect(
+      store.currentMessages.some((m) => m.type === 'system_status' && m.status === 'generating'),
+    ).toBe(false)
+    // 追加了可读错误消息
+    const failMsg = store.currentMessages.find((m) => m.type === 'assistant_text')
+    expect(failMsg?.content).toContain('内容不合规')
+  })
+
+  it('selectTopic 从后端加载草稿后 ratio/duration 保持默认值（后端不持久化）', async () => {
+    listTopicsMock.mockResolvedValue([
+      {
+        id: 'topic-1',
+        title: '主题1',
+        coverImage: null,
+        lastPrompt: '',
+        updatedAt: 1,
+        createdAt: 1,
+        messageCount: 0,
+        status: 'idle',
+      },
+    ])
+    // 后端 getDraft 不返回 ratio/duration（内存态不持久化）
+    getDraftMock.mockResolvedValue({
+      topicId: 'topic-1',
+      prompt: '测试',
+      model: 'openai/gpt-image-2',
+      size: 'auto',
+      quality: 'high',
+      n: 1,
+      referenceImages: [],
+    })
+
+    const store = useChatStore()
+    await store.bootstrap()
+
+    // ensureDraft 兜底补默认值，避免 n-select 显示空
+    expect(store.currentDraft.ratio).toBe('16:9')
+    expect(store.currentDraft.duration).toBe(5)
+  })
+
+  it('videoRefMode 默认值为 first_frame', async () => {
+    const store = useChatStore()
+    await store.createTopic('海报概念')
+
+    expect(store.currentDraft.videoRefMode).toBe('first_frame')
+  })
+
+  it('completeVideoGeneration 的消息 meta 含 videoRefMode', async () => {
+    const store = useChatStore()
+    await store.createTopic('海报概念')
+    await store.addUserPrompt('一只猫奔跑')
+    store.currentDraft.videoRefMode = 'first_last'
+
+    await store.completeVideoGeneration(
+      {
+        videos: [{ url: '/files/generated/v.mp4', localPath: '/files/generated/v.mp4' }],
+        providerName: '火山方舟',
+        ratio: '16:9',
+        duration: 5,
+        resolution: '720p',
+        videoRefMode: 'first_last',
+      },
+      '一只猫奔跑',
+    )
+
+    const msg = store.currentMessages.find((m) => m.type === 'assistant_videos')
+    expect(msg.meta.videoRefMode).toBe('first_last')
+    expect(msg.videoRefMode).toBe('first_last')
+  })
+
+  it('serializeDraft 携带 videoRefMode，防抖保存传给后端', async () => {
+    const store = useChatStore()
+    await store.createTopic('海报概念')
+
+    store.currentDraft.videoRefMode = 'reference'
+    vi.advanceTimersByTime(300)
+
+    expect(saveDraftMock).toHaveBeenCalledWith(
+      'topic-1',
+      expect.objectContaining({ videoRefMode: 'reference' }),
+    )
+  })
 })

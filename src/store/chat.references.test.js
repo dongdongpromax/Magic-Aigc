@@ -136,7 +136,7 @@ describe('chat reference images', () => {
 
     await store.addReferenceFromMessage({
       id: 'msg-1',
-      images: [{ id: 'img-1', url: '/files/generated/test.png' }],
+      images: [{ id: 'img-1', url: '/files/generated/test.png', mimeType: 'image/png' }],
     })
 
     expect(registerReferenceFromMessageMock).toHaveBeenCalledWith('topic-1', {
@@ -181,7 +181,7 @@ describe('chat reference images', () => {
 
     await store.addReferenceFromMessage({
       id: 'msg-1',
-      images: [{ id: 'img-1', url: '/files/generated/test.png' }],
+      images: [{ id: 'img-1', url: '/files/generated/test.png', mimeType: 'image/png' }],
     })
 
     expect(store.lastError).toContain('网络错误')
@@ -198,6 +198,20 @@ describe('chat reference images', () => {
       images: [],
     })
 
+    expect(registerReferenceFromMessageMock).not.toHaveBeenCalled()
+    expect(store.lastError).toContain('没有可设为参考图')
+  })
+
+  it('addReferenceFromMessage 过滤视频文件（video/* mimeType 不能作首帧参考图）', async () => {
+    const store = useChatStore()
+    await store.createTopic('测试主题')
+
+    await store.addReferenceFromMessage({
+      id: 'msg-1',
+      images: [{ id: 'vid-1', url: '/files/generated/test.mp4', mimeType: 'video/mp4' }],
+    })
+
+    // 视频文件被 image/* 过滤器排除，不应调 API
     expect(registerReferenceFromMessageMock).not.toHaveBeenCalled()
     expect(store.lastError).toContain('没有可设为参考图')
   })

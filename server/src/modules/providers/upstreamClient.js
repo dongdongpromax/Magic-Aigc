@@ -111,6 +111,59 @@ export function createUpstreamClient() {
     },
 
     /**
+     * 创建视频生成任务（火山 Seedance 异步任务接口）
+     *
+     * POST {baseUrl}/contents/generations/tasks
+     * 返回 { id: 'cgt-xxx' }，后续用 getVideoTask 轮询状态。
+     *
+     * @param {{ id: string; name: string; baseUrl: string; apiKeys: Array<string> }} provider
+     * @param {object} payload buildVideoPayload 构建的请求体
+     * @param {number} timeout 创建任务超时毫秒（默认 60s）
+     * @returns {Promise<{ id: string }>} 上游返回的任务对象
+     */
+    async createVideoTask(provider, payload, timeout = 60000) {
+      return withKeyRotation(provider, async (key) => {
+        const response = await axios.post(
+          `${provider.baseUrl}/contents/generations/tasks`,
+          payload,
+          {
+            timeout,
+            headers: {
+              Authorization: `Bearer ${key}`,
+              'Content-Type': 'application/json',
+            },
+          },
+        )
+        return response.data
+      })
+    },
+
+    /**
+     * 查询视频生成任务状态（火山 Seedance 异步任务接口）
+     *
+     * GET {baseUrl}/contents/generations/tasks/{id}
+     * 返回 { id, model, status, content:{video_url,...}, usage, error:{message} }
+     * status 枚举：queued | running | succeeded | failed | cancelled | expired
+     *
+     * @param {{ id: string; name: string; baseUrl: string; apiKeys: Array<string> }} provider
+     * @param {string} taskId 任务 ID
+     * @param {number} timeout 查询超时毫秒（默认 30s）
+     * @returns {Promise<object>} 任务状态对象
+     */
+    async getVideoTask(provider, taskId, timeout = 30000) {
+      return withKeyRotation(provider, async (key) => {
+        const response = await axios.get(
+          `${provider.baseUrl}/contents/generations/tasks/${encodeURIComponent(taskId)}`,
+          {
+            timeout,
+            headers: { Authorization: `Bearer ${key}` },
+          },
+        )
+        return response.data
+      })
+    },
+
+    /**
      * 逐把 Key 探测可用性（不走轮询，每把都试）
      * @param {{ baseUrl: string; apiKeys: Array<string> }} provider
      * @returns {Promise<{ total: number; available: number; results: Array<{ tail: string; ok: boolean; status?: number; latencyMs: number }> }>}

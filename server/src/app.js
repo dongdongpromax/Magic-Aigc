@@ -5,6 +5,7 @@ import express from 'express'
 import { MulterError } from 'multer'
 import { createImageRoutes } from './modules/images/routes.js'
 import { createProviderRoutes } from './modules/providers/routes.js'
+import { createVideoRoutes } from './modules/videos/routes.js'
 import { createSettingsRoutes } from './modules/settings/routes.js'
 import { createTopicRoutes } from './modules/topics/routes.js'
 
@@ -18,6 +19,9 @@ function isClientError(error) {
   if (error instanceof MulterError) return true
   // 自定义业务校验错误（如参考图超上限、消息不存在等）
   if (error?.name === 'ValidationError') return true
+  // 显式标记可向调用方暴露的错误（如视频生成上游失败 502/超时 504，
+  // 其 message 是用户可读的上游原因「内容不合规」等，需透传给前端）
+  if (error?.expose === true) return true
   // 显式带 4xx status 的错误
   if (error?.status && error.status >= 400 && error.status < 500) return true
   return false
@@ -74,6 +78,10 @@ export function createApp(deps = {}) {
   // deps.providersService 未注入时（旧测试）跳过，保持向后兼容
   if (deps.providersService) {
     app.use('/api', createProviderRoutes({ providersService: deps.providersService }))
+  }
+  // 视频生成路由：deps.videoService 未注入时（旧测试）跳过，保持向后兼容
+  if (deps.videoService) {
+    app.use('/api', createVideoRoutes({ videoService: deps.videoService }))
   }
 
   // P0-6: 错误处理中间件分类脱敏

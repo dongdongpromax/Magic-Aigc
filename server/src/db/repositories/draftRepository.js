@@ -35,6 +35,8 @@ export function createDraftRepository(pool) {
         size: draft?.size || 'auto',
         quality: draft?.quality || 'high',
         n: draft?.n || 1,
+        // 视频参考模式：与持久化的参考图同步，防刷新后模式与图片错配
+        videoRefMode: draft?.video_ref_mode || 'first_frame',
         referenceImages,
       }
     },
@@ -95,12 +97,14 @@ export function createDraftRepository(pool) {
         size: payload.size || 'auto',
         quality: payload.quality || 'high',
         n: payload.n || 1,
+        // 视频参考模式：与持久化的参考图同步，防刷新后模式与图片错配
+        videoRefMode: payload.videoRefMode || 'first_frame',
         updatedAt: Date.now(),
       }
 
       await executor.query(
-        `INSERT INTO drafts (topic_id, prompt, model, provider_id, size, quality, n, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO drafts (topic_id, prompt, model, provider_id, size, quality, n, video_ref_mode, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON DUPLICATE KEY UPDATE
          prompt = VALUES(prompt),
          model = VALUES(model),
@@ -108,6 +112,7 @@ export function createDraftRepository(pool) {
          size = VALUES(size),
          quality = VALUES(quality),
          n = VALUES(n),
+         video_ref_mode = VALUES(video_ref_mode),
          updated_at = VALUES(updated_at)`,
         [
           topicId,
@@ -117,6 +122,7 @@ export function createDraftRepository(pool) {
           next.size,
           next.quality,
           next.n,
+          next.videoRefMode,
           next.updatedAt,
         ],
       )

@@ -5,6 +5,7 @@ import ProviderList from './ProviderList.vue'
 import ProviderDetail from './ProviderDetail.vue'
 import CreateProviderForm from './CreateProviderForm.vue'
 import GeneralSettings from './GeneralSettings.vue'
+import DefaultParamsSettings from './DefaultParamsSettings.vue'
 
 /**
  * 设置模态（CherryStudio 式模型广场）
@@ -21,16 +22,20 @@ const emit = defineEmits(['update:show'])
 
 const providersStore = useProvidersStore()
 
-/** 右栏视图：provider（详情）/ general（通用设置）/ create（新建中转站） */
+/** 右栏视图：provider（详情）/ general（通用设置）/ defaults（默认参数）/ create（新建中转站） */
 const view = ref('provider')
 
 // 模态打开时加载列表并重置视图（immediate 覆盖挂载时 show 已为 true 的场景）
 watch(
   () => props.show,
-  (show) => {
-    if (show) {
-      view.value = 'provider'
-      providersStore.loadProviders()
+  async (show) => {
+    if (!show) return
+    view.value = 'provider'
+    // loadProviders 有缓存：若聊天区已加载过列表会早退，此时选中家的模型可能从未加载，
+    // 需补一次 selectProvider（其自身带模型缓存，不会重复请求）
+    await providersStore.loadProviders()
+    if (providersStore.selectedProviderId) {
+      await providersStore.selectProvider(providersStore.selectedProviderId)
     }
   },
   { immediate: true },
@@ -75,18 +80,29 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
             @toggle="handleToggle"
           />
           <div class="sidebar-footer">
+            <div class="footer-settings-row">
+              <button
+                type="button"
+                class="footer-btn"
+                :class="{ 'is-active': view === 'general' }"
+                data-action="open-general"
+                @click="view = 'general'"
+              >
+                通用
+              </button>
+              <button
+                type="button"
+                class="footer-btn"
+                :class="{ 'is-active': view === 'defaults' }"
+                data-action="open-defaults"
+                @click="view = 'defaults'"
+              >
+                默认参数
+              </button>
+            </div>
             <button
               type="button"
-              class="footer-btn"
-              :class="{ 'is-active': view === 'general' }"
-              data-action="open-general"
-              @click="view = 'general'"
-            >
-              通用
-            </button>
-            <button
-              type="button"
-              class="footer-btn"
+              class="footer-btn footer-btn--add"
               data-action="add-provider"
               @click="view = 'create'"
             >
@@ -98,6 +114,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
         <section class="settings-main">
           <ProviderDetail v-if="view === 'provider'" />
           <GeneralSettings v-else-if="view === 'general'" />
+          <DefaultParamsSettings v-else-if="view === 'defaults'" />
           <CreateProviderForm
             v-else-if="view === 'create'"
             @created="view = 'provider'"
@@ -143,9 +160,16 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
 
 .sidebar-footer {
   display: flex;
+  flex-direction: column;
   gap: 8px;
   padding: 12px 14px;
   border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+/* 设置类入口（通用 / 默认参数）一行平铺 */
+.footer-settings-row {
+  display: flex;
+  gap: 8px;
 }
 
 .footer-btn {
@@ -168,6 +192,12 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
     background: rgba(99, 102, 241, 0.2);
     color: rgba(165, 180, 252, 0.95);
   }
+}
+
+/* 「+ 添加」整行铺满，与设置入口分行避免混淆 */
+.footer-btn--add {
+  flex: 0 0 auto;
+  width: 100%;
 }
 
 .settings-main {

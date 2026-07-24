@@ -1,12 +1,15 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import { useChatStore } from '@/store/chat'
-import { Plus, Search, Image as ImageIcon, Trash2 } from 'lucide-vue-next'
+import { Plus, Search, Image as ImageIcon, Aperture, Trash2 } from 'lucide-vue-next'
+import ConfirmDialog from './ConfirmDialog.vue'
 
 const chatStore = useChatStore()
 const keyword = ref('')
 // 正在删除的主题 ID，用于禁用对应按钮防重复点击
 const deletingTopicId = ref('')
+// 删除二次确认弹窗状态（替代原生 window.confirm，确保确认动作可见可靠）
+const deleteConfirm = reactive({ show: false, topicId: '', title: '' })
 
 const filteredTopics = computed(() => {
   const search = keyword.value.trim().toLowerCase()
@@ -24,27 +27,44 @@ const handleSelectTopic = (topicId) => {
 }
 
 /**
+ * 判断封面是否为视频文件
+ *
+ * 视频生成消息的封面是 .mp4 路径，<img> 无法渲染会裂图，
+ * 改用 <video> 取首帧作缩略图。
+ * @param {string} url 封面路径
+ * @returns {boolean}
+ */
+function isVideoCover(url) {
+  return /\.(mp4|webm|mov|m4v)$/i.test(url || '')
+}
+
+/**
  * P0-8: 删除主题
  *
- * 用原生 confirm 弹窗防误删（避免引入 NDialogProvider 的额外依赖）。
- * 调用 chatStore.deleteTopic，后端会事务级联清理 5 表 + 文件。
+ * 点击删除按钮只打开二次确认弹窗，不直接删除（防止误删）。
+ * 确认后由 handleConfirmDelete 调 chatStore.deleteTopic，后端事务级联清理 5 表 + 文件。
  *
  * @param {Event} event 点击事件（用于 stopPropagation 防止触发选中）
  * @param {string} topicId 主题 ID
  */
-const handleDeleteTopic = async (event, topicId) => {
+const handleDeleteTopic = (event, topicId) => {
   // 阻止冒泡，避免触发 topic-item 的 selectTopic
   event?.stopPropagation()
 
   const topic = chatStore.topics.find((t) => t.id === topicId)
-  const title = topic?.title || '该主题'
-  // 原生确认框，防止误删；未来可升级为 NDialog
-  if (!window.confirm(`确定删除「${title}」吗？该操作会清除其所有消息和文件，且不可恢复。`)) {
-    return
-  }
+  deleteConfirm.topicId = topicId
+  deleteConfirm.title = topic?.title || '该主题'
+  deleteConfirm.show = true
+}
 
+/**
+ * 确认删除：执行事务级联清理
+ */
+const handleConfirmDelete = async () => {
+  const topicId = deleteConfirm.topicId
+  deleteConfirm.show = false
   // 防重复点击
-  if (deletingTopicId.value) return
+  if (!topicId || deletingTopicId.value) return
   deletingTopicId.value = topicId
 
   try {
@@ -63,11 +83,11 @@ const handleDeleteTopic = async (event, topicId) => {
     <div class="sidebar-header">
       <div class="brand">
         <div class="brand-icon">
-          <ImageIcon :size="18" />
+          <Aperture :size="18" />
         </div>
         <div class="brand-copy">
-          <span class="brand-title">图像工作台</span>
-          <span class="brand-subtitle">GPT Image-2 对话创作</span>
+          <span class="brand-title">创作工坊</span>
+          <span class="brand-subtitle">图像 · 视频 对话创作</span>
         </div>
       </div>
 
@@ -84,15 +104,24 @@ const handleDeleteTopic = async (event, topicId) => {
 
     <div class="topic-list">
       <div class="topic-list-title">创作会话</div>
-      <button
+      <div
         v-for="topic in filteredTopics"
         :key="topic.id"
         class="topic-item"
         :class="{ active: topic.id === chatStore.currentTopicId }"
-        type="button"
+        role="button"
+        tabindex="0"
         @click="handleSelectTopic(topic.id)"
+        @keydown.enter.prevent="handleSelectTopic(topic.id)"
       >
-        <img v-if="topic.coverImage" :src="topic.coverImage" alt="thumbnail" class="topic-thumb" />
+        <video
+          v-if="topic.coverImage && isVideoCover(topic.coverImage)"
+          :src="`${topic.coverImage}#t=0.1`"
+          muted
+          preload="metadata"
+          class="topic-thumb"
+        ></video>
+        <img v-else-if="topic.coverImage" :src="topic.coverImage" alt="thumbnail" class="topic-thumb" />
         <div v-else class="topic-thumb-placeholder">
           <ImageIcon :size="16" />
         </div>
@@ -113,8 +142,18 @@ const handleDeleteTopic = async (event, topicId) => {
         >
           <Trash2 :size="14" />
         </button>
-      </button>
+      </div>
     </div>
+
+    <!-- 删除二次确认 -->
+    <ConfirmDialog
+      v-model:show="deleteConfirm.show"
+      title="确定删除？"
+      :content="`将删除「${deleteConfirm.title}」及其所有消息和文件，且不可恢复。`"
+      confirm-text="删除"
+      danger
+      @confirm="handleConfirmDelete"
+    />
   </div>
 </template>
 

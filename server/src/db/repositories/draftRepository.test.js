@@ -220,6 +220,30 @@ describe('draftRepository', () => {
         model: 'openai/gpt-image-2',
       })
     })
+
+    it('保存 videoRefMode 到 video_ref_mode 列', async () => {
+      const executor = createMockExecutor()
+      // INSERT drafts
+      executor.query.mockResolvedValueOnce([{}])
+      // listReferenceImages SELECT 空
+      executor.query.mockResolvedValueOnce([[]])
+      const repo = createDraftRepository(executor)
+
+      await repo.saveDraft(
+        'topic-1',
+        {
+          prompt: 'p',
+          model: 'm',
+          videoRefMode: 'first_last',
+        },
+        executor,
+      )
+
+      const [sql, params] = executor.query.mock.calls[0]
+      expect(sql).toMatch(/video_ref_mode/)
+      // 参数中应包含 videoRefMode 值（updatedAt 是最后一个）
+      expect(params).toContain('first_last')
+    })
   })
 
   describe('clearReferenceImages', () => {
@@ -271,6 +295,54 @@ describe('draftRepository', () => {
         n: 1,
         referenceImages: [],
       })
+    })
+
+    it('读取 video_ref_mode 映射为 videoRefMode，空值回退 first_frame', async () => {
+      const executor = createMockExecutor()
+      // SELECT drafts 返回含 video_ref_mode
+      executor.query.mockResolvedValueOnce([
+        [
+          {
+            topic_id: 'topic-1',
+            prompt: 'p',
+            model: 'm',
+            provider_id: '',
+            size: 'auto',
+            quality: 'high',
+            n: 1,
+            video_ref_mode: 'reference',
+          },
+        ],
+      ])
+      // listReferenceImages 空
+      executor.query.mockResolvedValueOnce([[]])
+      const repo = createDraftRepository(executor)
+
+      const draft = await repo.getDraft('topic-1', executor)
+      expect(draft.videoRefMode).toBe('reference')
+    })
+
+    it('video_ref_mode 为空时回退 first_frame', async () => {
+      const executor = createMockExecutor()
+      executor.query.mockResolvedValueOnce([
+        [
+          {
+            topic_id: 'topic-1',
+            prompt: 'p',
+            model: 'm',
+            provider_id: '',
+            size: 'auto',
+            quality: 'high',
+            n: 1,
+            video_ref_mode: null,
+          },
+        ],
+      ])
+      executor.query.mockResolvedValueOnce([[]])
+      const repo = createDraftRepository(executor)
+
+      const draft = await repo.getDraft('topic-1', executor)
+      expect(draft.videoRefMode).toBe('first_frame')
     })
   })
 })

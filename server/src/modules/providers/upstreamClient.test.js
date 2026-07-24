@@ -121,4 +121,51 @@ describe('upstreamClient', () => {
     ).rejects.toMatchObject({ status: 400 })
     expect(axios.post).not.toHaveBeenCalled()
   })
+
+  it('createVideoTask 用轮询 Key POST {baseUrl}/contents/generations/tasks 并返回 {id}', async () => {
+    axios.post.mockResolvedValue({ data: { id: 'cgt-123' } })
+    const client = createUpstreamClient()
+
+    const result = await client.createVideoTask(provider, { model: 'doubao-seedance-2-0-260128' })
+
+    expect(axios.post).toHaveBeenCalledWith(
+      'https://openrouter.ai/api/v1/contents/generations/tasks',
+      { model: 'doubao-seedance-2-0-260128' },
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: 'Bearer sk-a',
+          'Content-Type': 'application/json',
+        }),
+      }),
+    )
+    expect(result).toEqual({ id: 'cgt-123' })
+  })
+
+  it('getVideoTask 用轮询 Key GET {baseUrl}/contents/generations/tasks/{id} 并返回任务状态', async () => {
+    axios.get.mockResolvedValue({
+      data: { id: 'cgt-123', status: 'succeeded', content: { video_url: 'https://x/v.mp4' } },
+    })
+    const client = createUpstreamClient()
+
+    const result = await client.getVideoTask(provider, 'cgt-123')
+
+    expect(axios.get).toHaveBeenCalledWith(
+      'https://openrouter.ai/api/v1/contents/generations/tasks/cgt-123',
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: 'Bearer sk-a' }),
+      }),
+    )
+    expect(result.status).toBe('succeeded')
+  })
+
+  it('getVideoTask 对 taskId 做 URL 编码（含特殊字符时安全拼路径）', async () => {
+    axios.get.mockResolvedValue({ data: { status: 'queued' } })
+    const client = createUpstreamClient()
+
+    await client.getVideoTask(provider, 'cgt a/b')
+
+    expect(axios.get.mock.calls[0][0]).toBe(
+      'https://openrouter.ai/api/v1/contents/generations/tasks/cgt%20a%2Fb',
+    )
+  })
 })

@@ -20,6 +20,52 @@ export function isImageModelId(modelId) {
   return IMAGE_KEYWORDS.some((keyword) => lower.includes(keyword))
 }
 
+/** 视频模型关键词（命中即认为支持视频生成） */
+const VIDEO_KEYWORDS = [
+  'seedance',
+  'wanx',
+  'cogvideox',
+  'kling',
+  'sora',
+  'hunyuan-video',
+  'vidu',
+  'minimax-video',
+]
+
+/**
+ * 判断模型 ID 是否为视频生成模型
+ * @param {string} modelId
+ * @returns {boolean}
+ */
+export function isVideoModelId(modelId) {
+  const lower = String(modelId).toLowerCase()
+  return VIDEO_KEYWORDS.some((keyword) => lower.includes(keyword))
+}
+
+/** 嵌入模型关键词（命中即认为支持向量嵌入） */
+const EMBEDDING_KEYWORDS = ['embed', 'embedding', 'text-embedding', 'e5', 'bge-']
+
+/** 语音模型关键词（命中即认为支持语音合成/识别） */
+const AUDIO_KEYWORDS = ['tts', 'whisper', 'speech', 'audio', 'voice', 'bark', 'musicgen']
+
+/**
+ * 检测模型类型（用于模型列表 tag 标签展示）
+ *
+ * 优先级：video > image > embedding > audio > text（兜底）
+ * 大部分模型是文本对话模型，未命中其他类型时默认归为 text。
+ *
+ * @param {string} modelId 模型 ID
+ * @returns {'video'|'image'|'embedding'|'audio'|'text'} 模型类型
+ */
+export function detectModelType(modelId) {
+  if (isVideoModelId(modelId)) return 'video'
+  if (isImageModelId(modelId)) return 'image'
+  const lower = String(modelId).toLowerCase()
+  if (EMBEDDING_KEYWORDS.some((k) => lower.includes(k))) return 'embedding'
+  if (AUDIO_KEYWORDS.some((k) => lower.includes(k))) return 'audio'
+  return 'text'
+}
+
 /**
  * 创建中转站服务
  * @param {{ providersRepository: object; upstreamClient: object; settingsRepository: object }} deps
@@ -95,12 +141,12 @@ export function createProvidersService({
      * 代理拉取上游模型列表并 diff 合并入库
      *
      * 合并规则：
-     * - 新增：is_image 命中关键词 → enabled=1，否则 0
-     * - 已存在：仅更新 display_name（保留用户 enabled 状态）
+     * - 新增：全部 enabled=0，由用户手动启用（不再自动启用图像模型）
+     * - 已存在：仅更新 display_name + model_type（保留用户 enabled 状态）
      * - 上游消失：不删除，modelId 放入 staleModelIds 响应
      *
      * @param {string} id
-     * @returns {Promise<{ added: number; updated: number; total: number; autoEnabled: number; staleModelIds: Array<string> }>}
+     * @returns {Promise<{ added: number; updated: number; total: number; staleModelIds: Array<string> }>}
      */
     async fetchModels(id) {
       const provider = await mustGetProvider(id)
@@ -114,6 +160,8 @@ export function createProvidersService({
         modelId: m.id,
         displayName: m.name || m.id,
         isImage: isImageModelId(m.id),
+        isVideo: isVideoModelId(m.id),
+        modelType: detectModelType(m.id),
       }))
       await providersRepository.upsertFetchedModels(id, toUpsert)
 
@@ -122,13 +170,12 @@ export function createProvidersService({
         added: added.length,
         updated: toUpsert.length - added.length,
         total: toUpsert.length,
-        autoEnabled: added.filter((m) => m.isImage).length,
         staleModelIds: existing.filter((m) => !upstreamIds.has(m.modelId)).map((m) => m.modelId),
       }
     },
 
     /**
-     * 手动添加模型（isImage 按关键词自动判断）
+     * 手动添加模型（类型按关键词自动判断，默认启用）
      */
     async addModel(id, data) {
       await mustGetProvider(id)
@@ -136,6 +183,8 @@ export function createProvidersService({
         modelId: String(data.modelId).trim(),
         displayName: data.displayName || String(data.modelId).trim(),
         isImage: isImageModelId(data.modelId),
+        isVideo: isVideoModelId(data.modelId),
+        modelType: detectModelType(data.modelId),
       })
     },
 
