@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { ArrowLeft, RefreshCw, Trash2, X, Copy, Check, AlertCircle, CheckCircle2 } from 'lucide-vue-next'
+import { ArrowLeft, RefreshCw, Trash2, X, Copy, Check, AlertCircle, CheckCircle2, ImageIcon, VideoIcon } from 'lucide-vue-next'
 import { listUsageLogs, getUsageLogDetail, deleteUsageLog, clearAllUsageLogs } from '@/services/usageLogApi'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 
@@ -62,7 +62,48 @@ function formatDuration(ms) {
  */
 function truncatePrompt(prompt) {
   if (!prompt) return '-'
-  return prompt.length > 40 ? prompt.slice(0, 40) + '...' : prompt
+  return prompt.length > 50 ? prompt.slice(0, 50) + '...' : prompt
+}
+
+/**
+ * 格式化 prompt 长度（字符数 → 可读文案）
+ * @param {string} prompt
+ * @returns {string}
+ */
+function formatPromptLength(prompt) {
+  if (!prompt) return '-'
+  const len = prompt.length
+  if (len > 4000) return `${len} 字符（超长）`
+  if (len > 1000) return `${len} 字符`
+  return `${len} 字符`
+}
+
+/**
+ * 从日志中提取结果文件列表（优先用列表摘要的 resultFiles，回退到详情的 clientResponse）
+ * @param {object} log 日志对象
+ * @returns {Array<{ url: string; mimeType: string; kind: string }>}
+ */
+function extractResultFiles(log) {
+  if (log.resultFiles?.length) return log.resultFiles
+  // 详情模式：从 clientResponse 中提取
+  const cr = log.clientResponse
+  if (!cr) return []
+  const files = []
+  if (cr.images?.length) {
+    for (const img of cr.images) {
+      if (img.url || img.localPath) {
+        files.push({ url: img.url || img.localPath, mimeType: img.mimeType || 'image/png', kind: 'image' })
+      }
+    }
+  }
+  if (cr.videos?.length) {
+    for (const vid of cr.videos) {
+      if (vid.url || vid.localPath) {
+        files.push({ url: vid.url || vid.localPath, mimeType: vid.mimeType || 'video/mp4', kind: 'video' })
+      }
+    }
+  }
+  return files
 }
 
 /**
@@ -204,6 +245,12 @@ function handleBack() {
   router.push('/chat')
 }
 
+/** 当前选中日志的结果文件列表（computed，响应详情加载完成） */
+const selectedResultFiles = computed(() => {
+  if (!selectedLog.value) return []
+  return extractResultFiles(selectedLog.value)
+})
+
 onMounted(() => {
   fetchLogs()
 })
@@ -268,11 +315,12 @@ onMounted(() => {
       <table class="log-table" v-if="logs.length">
         <thead>
           <tr>
+            <th class="col-preview">预览</th>
             <th class="col-time">时间</th>
             <th class="col-type">类型</th>
             <th class="col-model">模型</th>
-            <th class="col-provider">中转站</th>
             <th class="col-prompt">提示词</th>
+            <th class="col-prompt-len">字数</th>
             <th class="col-status">状态</th>
             <th class="col-duration">耗时</th>
             <th class="col-actions">操作</th>
@@ -286,13 +334,30 @@ onMounted(() => {
             :class="{ selected: selectedLog?.id === log.id }"
             @click="handleSelectLog(log)"
           >
+            <td class="col-preview">
+              <div v-if="log.resultFiles?.length" class="row-preview">
+                <img
+                  v-if="log.resultFiles[0].kind === 'image'"
+                  :src="log.resultFiles[0].url"
+                  class="preview-thumb"
+                  alt="生成结果"
+                />
+                <div v-else class="preview-thumb preview-thumb--video">
+                  <VideoIcon :size="14" />
+                </div>
+                <span v-if="log.resultFiles.length > 1" class="preview-count">×{{ log.resultFiles.length }}</span>
+              </div>
+              <span v-else class="preview-empty">-</span>
+            </td>
             <td class="col-time">{{ formatTime(log.createdAt) }}</td>
             <td class="col-type">
               <span class="type-tag" :class="log.type">{{ log.type === 'image' ? '图像' : '视频' }}</span>
             </td>
             <td class="col-model">{{ log.model || '-' }}</td>
-            <td class="col-provider">{{ log.providerName || '-' }}</td>
             <td class="col-prompt">{{ truncatePrompt(log.prompt) }}</td>
+            <td class="col-prompt-len" :class="{ 'len-warn': log.prompt?.length > 4000 }">
+              {{ formatPromptLength(log.prompt) }}
+            </td>
             <td class="col-status">
               <span class="status-tag" :class="log.status">
                 <component :is="log.status === 'success' ? CheckCircle2 : AlertCircle" :size="12" />
@@ -344,8 +409,11 @@ onMounted(() => {
             </button>
           </div>
 
-          <!-- 摘要信息 -->
-          <div class="drawer-summary">
+          <!-- 可滚动内容区：摘要/提示词/预览/错误/JSON 全部包裹在此，
+               头部固定吸顶，内容超出视口时滚动，避免被 overflow:hidden 裁剪看不到图片与 JSON -->
+          <div class="drawer-content">
+            <!-- 摘要信息 -->
+            <div class="drawer-summary">
             <div class="summary-item">
               <span class="summary-label">模型</span>
               <span class="summary-value">{{ selectedLog.model || '-' }}</span>
@@ -358,9 +426,49 @@ onMounted(() => {
               <span class="summary-label">耗时</span>
               <span class="summary-value">{{ formatDuration(selectedLog.durationMs) }}</span>
             </div>
+            <div class="summary-item">
+              <span class="summary-label">字数</span>
+              <span class="summary-value" :class="{ 'len-warn': selectedLog.prompt?.length > 4000 }">
+                {{ formatPromptLength(selectedLog.prompt) }}
+              </span>
+            </div>
             <div class="summary-item" v-if="selectedLog.topicId">
               <span class="summary-label">主题</span>
-              <span class="summary-value">{{ selectedLog.topicId }}</span>
+              <span class="summary-value summary-value--mono">{{ selectedLog.topicId }}</span>
+            </div>
+            <div class="summary-item" v-if="selectedResultFiles.length">
+              <span class="summary-label">结果</span>
+              <span class="summary-value">{{ selectedResultFiles.length }} 个文件</span>
+            </div>
+          </div>
+
+          <!-- 完整 prompt 展示 -->
+          <div v-if="selectedLog.prompt" class="prompt-section">
+            <div class="prompt-header">
+              <span class="prompt-label">完整提示词</span>
+              <button class="copy-btn" type="button" title="复制提示词" @click="handleCopy('prompt', selectedLog.prompt)">
+                <component :is="copiedField === 'prompt' ? Check : Copy" :size="13" />
+              </button>
+            </div>
+            <pre class="prompt-body">{{ selectedLog.prompt }}</pre>
+          </div>
+
+          <!-- 生成结果预览（图片/视频） -->
+          <div v-if="!isLoadingDetail && selectedResultFiles.length" class="result-preview-section">
+            <div class="preview-section-title">
+              <component :is="selectedResultFiles[0].kind === 'image' ? ImageIcon : VideoIcon" :size="14" />
+              <span>生成结果预览</span>
+              <span class="preview-count-label">{{ selectedResultFiles.length }} 个</span>
+            </div>
+            <div class="preview-grid">
+              <template v-for="(file, idx) in selectedResultFiles" :key="idx">
+                <div v-if="file.kind === 'image'" class="preview-item">
+                  <img :src="file.url" :alt="`生成结果 ${idx + 1}`" loading="lazy" />
+                </div>
+                <div v-else class="preview-item preview-item--video">
+                  <video :src="file.url" controls preload="metadata"></video>
+                </div>
+              </template>
             </div>
           </div>
 
@@ -410,6 +518,7 @@ onMounted(() => {
               </div>
             </div>
           </template>
+          </div><!-- /drawer-content -->
         </div>
       </div>
     </Teleport>
@@ -618,23 +727,79 @@ onMounted(() => {
   }
 }
 
+/* 预览缩略图列 */
+.col-preview {
+  width: 48px;
+  text-align: center;
+}
+
+.row-preview {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.preview-thumb {
+  width: 36px;
+  height: 36px;
+  border-radius: 3px;
+  object-fit: cover;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+
+  &--video {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 107, 53, 0.15);
+    color: rgba(255, 183, 148, 0.9);
+  }
+}
+
+.preview-count {
+  position: absolute;
+  bottom: -2px;
+  right: -4px;
+  font-size: 9px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.8);
+  color: rgba(255, 255, 255, 0.9);
+  line-height: 1.2;
+}
+
+.preview-empty {
+  color: $text-muted;
+  font-size: 12px;
+}
+
 .col-time {
   white-space: nowrap;
   color: $text-secondary;
   font-size: 12px;
 }
 
-.col-model,
-.col-provider {
+.col-model {
   color: $text-secondary;
 }
 
 .col-prompt {
-  max-width: 240px;
+  max-width: 200px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   color: $text-secondary;
+}
+
+.col-prompt-len {
+  white-space: nowrap;
+  color: $text-secondary;
+  font-size: 12px;
+
+  &.len-warn {
+    color: #f59e0b;
+    font-weight: 500;
+  }
 }
 
 .col-duration {
@@ -737,7 +902,7 @@ onMounted(() => {
   }
 }
 
-/* 详情抽屉 */
+/* 详情抽屉 — 加宽到 860px */
 .detail-overlay {
   position: fixed;
   inset: 0;
@@ -748,7 +913,7 @@ onMounted(() => {
 }
 
 .detail-drawer {
-  width: min(640px, calc(100vw - 48px));
+  width: min(860px, calc(100vw - 48px));
   height: 100%;
   background: rgba(18, 20, 26, 0.98);
   border-left: 1px solid rgba(255, 255, 255, 0.08);
@@ -756,6 +921,16 @@ onMounted(() => {
   flex-direction: column;
   overflow: hidden;
   box-shadow: -16px 0 48px rgba(0, 0, 0, 0.4);
+}
+
+/* 抽屉内容区可滚动：头部固定吸顶，内容区 flex:1 + min-height:0 + overflow-y:auto 整体滚动。
+   旧实现 .detail-drawer > &... 是无效选择器（& 在顶层为空），导致内容超出视口被
+   overflow:hidden 裁剪，图片预览与 JSON 段落看不到。现改为独立 .drawer-content 容器。 */
+.drawer-content {
+  flex: 1;
+  min-height: 0; /* flex 子项允许收缩，overflow 才能生效（默认 min-height:auto 会撑开） */
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .drawer-header {
@@ -797,10 +972,10 @@ onMounted(() => {
   }
 }
 
-/* 摘要信息 */
+/* 摘要信息 — 3列网格 */
 .drawer-summary {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 8px 16px;
   padding: 14px 20px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
@@ -823,6 +998,105 @@ onMounted(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+
+  &--mono {
+    font-family: 'SF Mono', 'Fira Code', 'Menlo', monospace;
+    font-size: 11px;
+  }
+
+  &.len-warn {
+    color: #f59e0b;
+    font-weight: 500;
+  }
+}
+
+/* 完整提示词区 */
+.prompt-section {
+  padding: 14px 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  flex-shrink: 0;
+}
+
+.prompt-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.prompt-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: $text-primary;
+}
+
+.prompt-body {
+  margin: 0;
+  padding: 12px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 3px;
+  font-family: 'SF Mono', 'Fira Code', 'Menlo', monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  color: rgba(255, 255, 255, 0.8);
+  max-height: 200px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* 生成结果预览区 */
+.result-preview-section {
+  padding: 14px 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  flex-shrink: 0;
+}
+
+.preview-section-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: $text-primary;
+}
+
+.preview-count-label {
+  font-size: 11px;
+  font-weight: 400;
+  color: $text-muted;
+}
+
+.preview-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.preview-item {
+  border-radius: 3px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+
+  img {
+    display: block;
+    max-width: 200px;
+    max-height: 200px;
+    object-fit: contain;
+    background: rgba(0, 0, 0, 0.3);
+  }
+
+  video {
+    display: block;
+    max-width: 280px;
+    max-height: 200px;
+  }
+
+  &--video {
+    padding: 0;
+  }
 }
 
 /* 错误详情 */
@@ -936,7 +1210,7 @@ onMounted(() => {
   line-height: 1.6;
   color: rgba(255, 255, 255, 0.8);
   overflow-x: auto;
-  max-height: 400px;
+  max-height: 500px;
   overflow-y: auto;
   white-space: pre-wrap;
   word-break: break-all;

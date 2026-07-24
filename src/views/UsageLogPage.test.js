@@ -202,4 +202,94 @@ describe('UsageLogPage', () => {
     expect(wrapper.find('.error-banner').exists()).toBe(true)
     expect(wrapper.text()).toContain('加载失败')
   })
+
+  it('列表行展示结果缩略图和 prompt 字数', async () => {
+    usageLogApi.listUsageLogs.mockResolvedValue([
+      makeLogSummary({
+        id: 'log-1',
+        prompt: 'A'.repeat(5000),
+        resultFiles: [{ url: '/files/a.png', mimeType: 'image/png', kind: 'image' }],
+      }),
+      makeLogSummary({
+        id: 'log-2',
+        type: 'video',
+        prompt: '短提示词',
+        resultFiles: [{ url: '/files/v.mp4', mimeType: 'video/mp4', kind: 'video' }],
+      }),
+    ])
+    const router = createTestRouter('/logs')
+    await router.isReady()
+
+    const wrapper = mount(UsageLogPage, { global: { plugins: [router] } })
+    await flushPromises()
+
+    // 图像行有缩略图 img
+    const rows = wrapper.findAll('.log-row')
+    expect(rows[0].find('.preview-thumb').exists()).toBe(true)
+    expect(rows[0].find('img').attributes('src')).toBe('/files/a.png')
+    // 超长 prompt 字数标注「超长」
+    expect(rows[0].find('.col-prompt-len').classes()).toContain('len-warn')
+    expect(rows[0].text()).toContain('5000 字符（超长）')
+
+    // 视频行有视频缩略图占位
+    expect(rows[1].find('.preview-thumb--video').exists()).toBe(true)
+    // 短 prompt 不标警告
+    expect(rows[1].find('.col-prompt-len').classes()).not.toContain('len-warn')
+  })
+
+  it('详情抽屉展示完整提示词和生成结果预览', async () => {
+    usageLogApi.listUsageLogs.mockResolvedValue([makeLogSummary({ id: 'log-1', prompt: '一只猫' })])
+    usageLogApi.getUsageLogDetail.mockResolvedValue(
+      makeLogDetail({
+        id: 'log-1',
+        prompt: '一只猫坐在窗台上',
+        clientResponse: {
+          images: [{ url: '/files/cat.png', mimeType: 'image/png' }],
+        },
+      }),
+    )
+    const router = createTestRouter('/logs')
+    await router.isReady()
+
+    const wrapper = mount(UsageLogPage, { global: { plugins: [router] } })
+    await flushPromises()
+
+    await wrapper.find('.log-row').trigger('click')
+    await flushPromises()
+
+    // 完整提示词区域
+    expect(wrapper.find('.prompt-section').exists()).toBe(true)
+    expect(wrapper.find('.prompt-body').text()).toContain('一只猫坐在窗台上')
+    // 生成结果预览区域
+    expect(wrapper.find('.result-preview-section').exists()).toBe(true)
+    const previewImg = wrapper.find('.preview-item img')
+    expect(previewImg.exists()).toBe(true)
+    expect(previewImg.attributes('src')).toBe('/files/cat.png')
+  })
+
+  it('详情抽屉展示视频预览', async () => {
+    usageLogApi.listUsageLogs.mockResolvedValue([makeLogSummary({ id: 'log-1', type: 'video' })])
+    usageLogApi.getUsageLogDetail.mockResolvedValue(
+      makeLogDetail({
+        id: 'log-1',
+        type: 'video',
+        clientResponse: {
+          videos: [{ url: '/files/video.mp4', mimeType: 'video/mp4' }],
+        },
+      }),
+    )
+    const router = createTestRouter('/logs')
+    await router.isReady()
+
+    const wrapper = mount(UsageLogPage, { global: { plugins: [router] } })
+    await flushPromises()
+
+    await wrapper.find('.log-row').trigger('click')
+    await flushPromises()
+
+    // 视频预览
+    const previewVideo = wrapper.find('.preview-item video')
+    expect(previewVideo.exists()).toBe(true)
+    expect(previewVideo.attributes('src')).toBe('/files/video.mp4')
+  })
 })

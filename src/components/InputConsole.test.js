@@ -651,4 +651,186 @@ describe('InputConsole', () => {
     expect(store.lastError).toContain('首尾帧')
     expect(requestVideo).not.toHaveBeenCalled()
   })
+
+  it('图像模型 prompt 超过软提醒阈值(15k)显示琥珀色软提醒，超过硬限制(30k)显示红色强警告', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    seedProviders()
+    const wrapper = mount(InputConsole, { global: { plugins: [pinia] } })
+    const store = useChatStore()
+
+    store.currentDraft.providerId = 'openrouter'
+    store.currentDraft.model = 'openai/gpt-image-2'
+    await flushPromises()
+
+    // 短 prompt：无警告
+    store.currentDraft.prompt = '生成一张冷银色机械大厅'
+    await flushPromises()
+    expect(wrapper.find('[data-role="prompt-warn"]').exists()).toBe(false)
+
+    // 软提醒档（15001 字符）：琥珀色，data-level=soft
+    store.currentDraft.prompt = 'A'.repeat(15001)
+    await flushPromises()
+    let warnEl = wrapper.find('[data-role="prompt-warn"]')
+    expect(warnEl.exists()).toBe(true)
+    expect(warnEl.attributes('data-level')).toBe('soft')
+    expect(warnEl.classes()).not.toContain('prompt-warn--hard')
+    expect(warnEl.text()).toContain('15001')
+    expect(warnEl.text()).toContain('15000')
+
+    // 硬限制档（30001 字符）：红色强警告，data-level=hard
+    store.currentDraft.prompt = 'A'.repeat(30001)
+    await flushPromises()
+    warnEl = wrapper.find('[data-role="prompt-warn"]')
+    expect(warnEl.exists()).toBe(true)
+    expect(warnEl.attributes('data-level')).toBe('hard')
+    expect(warnEl.classes()).toContain('prompt-warn--hard')
+    expect(warnEl.text()).toContain('30001')
+    expect(warnEl.text()).toContain('30000')
+  })
+
+  it('图像模型 prompt 在 15k 以内（含 8975 等正常长 prompt）不显示警告', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    seedProviders()
+    const wrapper = mount(InputConsole, { global: { plugins: [pinia] } })
+    const store = useChatStore()
+
+    store.currentDraft.providerId = 'openrouter'
+    store.currentDraft.model = 'openai/gpt-image-2'
+    await flushPromises()
+
+    // 8975 字符（用户实际场景）：不警告，gpt-image-2 硬限制 32,000 完全支持
+    store.currentDraft.prompt = 'A'.repeat(8975)
+    await flushPromises()
+    expect(wrapper.find('[data-role="prompt-warn"]').exists()).toBe(false)
+  })
+
+  it('视频模型 prompt 超长时不显示超长警告', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const providersStore = useProvidersStore()
+    providersStore.providers = [
+      {
+        id: 'volcengine',
+        name: '火山方舟',
+        color: '#ff6b35',
+        enabled: true,
+        apiKeys: ['sk'],
+        enabledModels: [{ modelId: 'seedance-1-0', displayName: 'Seedance 1.0', isVideo: true }],
+      },
+    ]
+    const wrapper = mount(InputConsole, { global: { plugins: [pinia] } })
+    const store = useChatStore()
+
+    store.currentDraft.providerId = 'volcengine'
+    store.currentDraft.model = 'seedance-1-0'
+    // 视频 prompt 超长也不警告（视频模型 prompt 结构不同）
+    store.currentDraft.prompt = 'A'.repeat(5000)
+    await flushPromises()
+
+    expect(wrapper.find('[data-role="prompt-warn"]').exists()).toBe(false)
+  })
+
+  it('发送期间切换主题，传给 API 的 draft 仍是发起时的快照（不随主题切换错位）', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    seedProviders()
+    const wrapper = mount(InputConsole, { global: { plugins: [pinia] } })
+    const store = useChatStore()
+
+    // 发起时选中图像模型 A
+    store.currentDraft.providerId = 'openrouter'
+    store.currentDraft.model = 'openai/gpt-image-2'
+    await wrapper.find('textarea').setValue('画一只猫')
+
+    // mock addUserPrompt：在 resolve 前（模拟 await 期间）切换到另一个主题，
+    // 该主题 draft 是不同模型；若无快照，draft.value 会指向新主题导致参数错位
+    vi.spyOn(store, 'addUserPrompt').mockImplementation(async (prompt) => {
+      store.currentTopicId = 'topic-other'
+      store.drafts['topic-other'] = {
+        prompt: '',
+        model: 'flux/dev',
+        providerId: 'openrouter',
+        size: 'auto',
+        quality: 'high',
+        n: 1,
+        referenceImages: [],
+        ratio: '16:9',
+        duration: 5,
+        resolution: '720p',
+        videoRefMode: 'first_frame',
+      }
+      return 'topic-1'
+    })
+    vi.spyOn(store, 'completeImageGeneration').mockResolvedValue()
+    requestImages.mockResolvedValue({ images: [], revisedPrompt: '' })
+
+    await wrapper.find('.send-btn').trigger('click')
+    await flushPromises()
+
+    // requestImages 收到的 draft 应是发起时的快照（gpt-image-2），而非切换后的 flux/dev
+    expect(requestImages).toHaveBeenCalledWith(
+      'topic-1',
+      expect.objectContaining({
+        draft: expect.objectContaining({
+          providerId: 'openrouter',
+          model: 'openai/gpt-image-2',
+        }),
+      }),
+    )
+  })
+
+  it('发送期间切换到视频模型主题，仍走图像生成分支（wasVideoModel 快照）', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    seedProviders()
+    const wrapper = mount(InputConsole, { global: { plugins: [pinia] } })
+    const store = useChatStore()
+
+    // 发起时是图像模型
+    store.currentDraft.providerId = 'openrouter'
+    store.currentDraft.model = 'openai/gpt-image-2'
+    await wrapper.find('textarea').setValue('画一只猫')
+
+    // 注入一家视频模型中转站，供切换后主题使用
+    const providersStore = useProvidersStore()
+    providersStore.providers.push({
+      id: 'volcengine',
+      name: '火山方舟',
+      color: '#ff6b35',
+      enabled: true,
+      apiKeys: ['sk'],
+      enabledModels: [{ modelId: 'seedance-1-0', displayName: 'Seedance 1.0', isVideo: true }],
+    })
+
+    // mock addUserPrompt：await 期间切到视频模型主题
+    vi.spyOn(store, 'addUserPrompt').mockImplementation(async (prompt) => {
+      store.currentTopicId = 'topic-video'
+      store.drafts['topic-video'] = {
+        prompt: '',
+        model: 'seedance-1-0',
+        providerId: 'volcengine',
+        size: 'auto',
+        quality: 'high',
+        n: 1,
+        referenceImages: [],
+        ratio: '16:9',
+        duration: 5,
+        resolution: '720p',
+        videoRefMode: 'first_frame',
+      }
+      return 'topic-1'
+    })
+    vi.spyOn(store, 'completeImageGeneration').mockResolvedValue()
+    requestImages.mockResolvedValue({ images: [], revisedPrompt: '' })
+    requestVideo.mockResolvedValue({ videos: [] })
+
+    await wrapper.find('.send-btn').trigger('click')
+    await flushPromises()
+
+    // 仍走图像分支（requestImages 被调用），不会因切换到视频模型而误调 requestVideo
+    expect(requestImages).toHaveBeenCalled()
+    expect(requestVideo).not.toHaveBeenCalled()
+  })
 })

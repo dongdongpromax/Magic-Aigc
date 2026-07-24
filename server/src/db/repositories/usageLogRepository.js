@@ -49,6 +49,7 @@ export function createUsageLogRepository(pool) {
      *   upstreamRequest?: object;
      *   upstreamResponse?: object;
      *   clientResponse?: object;
+     *   resultFiles?: Array<{ url: string; mimeType: string; kind: string }>;
      *   errorMessage?: string;
      *   durationMs?: number;
      * }} entry
@@ -62,8 +63,8 @@ export function createUsageLogRepository(pool) {
         `INSERT INTO usage_logs
           (id, topic_id, type, status, provider_name, model, prompt,
            client_request, upstream_request, upstream_response, client_response,
-           error_message, duration_ms, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           result_files, error_message, duration_ms, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           id,
           entry.topicId || null,
@@ -76,6 +77,7 @@ export function createUsageLogRepository(pool) {
           entry.upstreamRequest ? JSON.stringify(entry.upstreamRequest) : null,
           entry.upstreamResponse ? JSON.stringify(entry.upstreamResponse) : null,
           entry.clientResponse ? JSON.stringify(entry.clientResponse) : null,
+          entry.resultFiles ? JSON.stringify(entry.resultFiles) : null,
           entry.errorMessage || null,
           entry.durationMs ?? null,
           now,
@@ -93,7 +95,7 @@ export function createUsageLogRepository(pool) {
       const { type, limit = 100, offset = 0 } = options
       const params = []
       let sql = `SELECT id, topic_id, type, status, provider_name, model, prompt,
-                        error_message, duration_ms, created_at
+                        result_files, error_message, duration_ms, created_at
                  FROM usage_logs`
       if (type) {
         sql += ' WHERE type = ?'
@@ -111,6 +113,7 @@ export function createUsageLogRepository(pool) {
         providerName: row.provider_name,
         model: row.model,
         prompt: row.prompt,
+        resultFiles: parseJson(row.result_files),
         errorMessage: row.error_message,
         durationMs: row.duration_ms,
         createdAt: row.created_at,
@@ -138,6 +141,7 @@ export function createUsageLogRepository(pool) {
         upstreamRequest: parseJson(row.upstream_request),
         upstreamResponse: parseJson(row.upstream_response),
         clientResponse: parseJson(row.client_response),
+        resultFiles: parseJson(row.result_files),
         errorMessage: row.error_message,
         durationMs: row.duration_ms,
         createdAt: row.created_at,

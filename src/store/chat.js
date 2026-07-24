@@ -203,6 +203,12 @@ export const useChatStore = defineStore('chat', () => {
    * @returns {Promise<string>}
    */
   async function selectTopic(topicId) {
+    // 切换前 flush 当前主题的 pending 草稿，避免快速来回切换时
+    // 本地未保存输入被 getRemoteDraft 返回的后端旧值整体覆盖而丢失
+    if (currentTopicId.value && currentTopicId.value !== topicId) {
+      await flushDraftPersist(currentTopicId.value)
+    }
+
     currentTopicId.value = topicId
     const [nextMessages, nextDraft] = await Promise.all([
       getRemoteMessages(topicId),
@@ -235,6 +241,11 @@ export const useChatStore = defineStore('chat', () => {
    * @returns {Promise<string>} 新主题 ID
    */
   async function createTopic(title = '新主题') {
+    // 新建主题前 flush 当前主题 pending 草稿，避免丢失未保存输入
+    if (currentTopicId.value) {
+      await flushDraftPersist(currentTopicId.value)
+    }
+
     const topic = await createRemoteTopic(title)
     topics.value.unshift(topic)
     drafts[topic.id] = await getRemoteDraft(topic.id)
@@ -422,12 +433,38 @@ export const useChatStore = defineStore('chat', () => {
 
     clearTimeout(draftTimers.get(topicId))
     const timer = setTimeout(() => {
+      // 执行后立即清除记录，使 draftTimers 准确反映「是否有 pending 未执行定时器」，
+      // 让 flushDraftPersist 能正确区分 pending 与已执行，避免重复保存
+      draftTimers.delete(topicId)
       // P1-3: 取消静默吞错，让用户感知保存失败
       saveRemoteDraft(topicId, serializeDraft(ensureDraft(topicId))).catch((err) => {
         lastError.value = `草稿保存失败：${err?.message || ''}`
       })
     }, 250)
     draftTimers.set(topicId, timer)
+  }
+
+  /**
+   * 同步 flush 指定主题的 pending 草稿（取消防抖定时器并立即保存）
+   *
+   * 用于切换主题前确保本地修改落盘，避免 selectTopic/createTopic 用后端旧值
+   * 覆盖尚未保存的本地输入（快速来回切换时输入丢失的根因）。
+   * 无 pending 定时器时直接返回，不产生额外网络请求。
+   * @param {string} topicId 主题 ID
+   * @returns {Promise<void>}
+   */
+  async function flushDraftPersist(topicId) {
+    if (!topicId) return
+    const timer = draftTimers.get(topicId)
+    if (!timer) return // 无 pending 修改，无需保存
+
+    clearTimeout(timer)
+    draftTimers.delete(topicId)
+    try {
+      await saveRemoteDraft(topicId, serializeDraft(ensureDraft(topicId)))
+    } catch (err) {
+      lastError.value = `草稿保存失败：${err?.message || ''}`
+    }
   }
 
   /**

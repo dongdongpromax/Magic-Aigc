@@ -258,7 +258,7 @@ export function createVideoService(deps) {
             videoRefMode: draft.videoRefMode || 'first_frame',
           }
 
-          // 记录使用日志（成功）：4 阶段数据 + 耗时
+          // 记录使用日志（成功）：4 阶段数据 + 耗时 + 生成结果文件列表
           if (usageLogger) {
             logEntry.status = 'success'
             logEntry.providerName = provider.name
@@ -270,6 +270,14 @@ export function createVideoService(deps) {
               finalTaskResponse,
             })
             logEntry.clientResponse = sanitizeForLog(result)
+            // 提取生成的视频 URL 列表，供日志列表页直接展示缩略图
+            logEntry.resultFiles = (result.videos || [])
+              .map((vid) => ({
+                url: vid.url || vid.localPath || '',
+                mimeType: vid.mimeType || 'video/mp4',
+                kind: 'video',
+              }))
+              .filter((f) => f.url)
             logEntry.durationMs = Date.now() - logStartTime
             await usageLogger.log(logEntry)
           }

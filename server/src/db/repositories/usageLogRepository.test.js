@@ -35,19 +35,24 @@ describe('usageLogRepository', () => {
       upstreamRequest: { model: 'openai/gpt-image-2' },
       upstreamResponse: { data: [{ b64_json: 'xxx' }] },
       clientResponse: { images: ['/files/a.png'] },
+      resultFiles: [{ url: '/files/a.png', mimeType: 'image/png', kind: 'image' }],
       durationMs: 1200,
     })
 
     expect(id).toBeTruthy()
     const insert = pool.calls.find((c) => /INSERT INTO usage_logs/.test(c.sql))
     expect(insert).toBeTruthy()
-    // 14 个占位符对应 14 个字段
-    expect(insert.params).toHaveLength(14)
+    // 15 个占位符对应 15 个字段（含 result_files）
+    expect(insert.params).toHaveLength(15)
     // 4 阶段 JSON 负载被序列化为字符串写入
     expect(insert.params[7]).toBe(JSON.stringify({ prompt: '一只猫' }))
     expect(insert.params[8]).toBe(JSON.stringify({ model: 'openai/gpt-image-2' }))
-    expect(insert.params[11]).toBeNull() // errorMessage 为空 → null
-    expect(insert.params[12]).toBe(1200) // durationMs
+    // result_files 序列化为 JSON 字符串
+    expect(insert.params[11]).toBe(
+      JSON.stringify([{ url: '/files/a.png', mimeType: 'image/png', kind: 'image' }]),
+    )
+    expect(insert.params[12]).toBeNull() // errorMessage 为空 → null
+    expect(insert.params[13]).toBe(1200) // durationMs
   })
 
   it('create 缺省字段时写 null，不抛错', async () => {
@@ -66,8 +71,9 @@ describe('usageLogRepository', () => {
     expect(insert.params[6]).toBeNull() // prompt
     // 未提供 JSON 负载 → null
     expect(insert.params[7]).toBeNull()
-    expect(insert.params[11]).toBeNull() // errorMessage
-    expect(insert.params[12]).toBeNull() // durationMs
+    expect(insert.params[11]).toBeNull() // resultFiles
+    expect(insert.params[12]).toBeNull() // errorMessage
+    expect(insert.params[13]).toBeNull() // durationMs
   })
 
   it('create 支持显式传入 executor（事务连接）', async () => {
@@ -96,6 +102,7 @@ describe('usageLogRepository', () => {
             provider_name: '火山方舟',
             model: 'seedance-1-0',
             prompt: '动起来',
+            result_files: '[{"url":"/files/v.mp4","mimeType":"video/mp4","kind":"video"}]',
             error_message: null,
             duration_ms: 5000,
             created_at: 200,
@@ -108,6 +115,7 @@ describe('usageLogRepository', () => {
             provider_name: null,
             model: null,
             prompt: null,
+            result_files: null,
             error_message: '超时',
             duration_ms: null,
             created_at: 100,
@@ -178,6 +186,7 @@ describe('usageLogRepository', () => {
             upstream_request: '{"model":"openai/gpt-image-2"}',
             upstream_response: '{"data":[]}',
             client_response: '{"images":["/files/a.png"]}',
+            result_files: '[{"url":"/files/a.png","mimeType":"image/png","kind":"image"}]',
             error_message: null,
             duration_ms: 1200,
             created_at: 100,
@@ -203,6 +212,7 @@ describe('usageLogRepository', () => {
     expect(detail.upstreamRequest).toEqual({ model: 'openai/gpt-image-2' })
     expect(detail.upstreamResponse).toEqual({ data: [] })
     expect(detail.clientResponse).toEqual({ images: ['/files/a.png'] })
+    expect(detail.resultFiles).toEqual([{ url: '/files/a.png', mimeType: 'image/png', kind: 'image' }])
   })
 
   it('findById 不存在时返回 null', async () => {

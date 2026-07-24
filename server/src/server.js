@@ -23,7 +23,7 @@ import { createProvidersService } from './modules/providers/providersService.js'
 import { buildImagePayload } from './modules/providers/imagePayload.js'
 import { createVideoService } from './modules/videos/videoService.js'
 import { createUsageLogger } from './modules/logs/usageLogger.js'
-import { sanitizeForLog } from './modules/logs/logSanitizer.js'
+import { sanitizeForLog, replaceReferenceDataUrls, replaceB64WithLocalPath } from './modules/logs/logSanitizer.js'
 
 const env = getServerEnv()
 const pool = createPool(env)
@@ -227,6 +227,10 @@ const app = createApp({
       // 提前声明以便 catch 块也能访问已捕获的数据
       let openrouterPayload = null
       let response = null
+      // draft / inputReferences 提到 try 外：catch 块需用它们构造参考图 dataUrl→filePath 映射，
+      // 把日志里的 data URL 替换为落盘 URL，避免 base64 膨胀
+      const draft = payload.draft || {}
+      let inputReferences = []
       const logEntry = {
         type: 'image',
         topicId,
@@ -236,8 +240,7 @@ const app = createApp({
 
       try {
         const settings = await settingsRepository.getSettings()
-        const draft = payload.draft || {}
-        const inputReferences = await Promise.all(
+        inputReferences = await Promise.all(
           (draft.referenceImages || []).map((item) => resolveReferenceInput(fileStorage, item)),
         )
 
@@ -306,14 +309,27 @@ const app = createApp({
             providerName: provider.name,
           }
 
-          // 记录使用日志（成功）：4 阶段数据 + 耗时
+          // 记录使用日志（成功）：4 阶段数据 + 耗时 + 生成结果文件列表
+          // 参考图 data URL → 落盘 filePath，b64_json → 落盘 localPath，避免 base64 膨胀日志
+          const refUrlMap = (draft.referenceImages || []).map((item, i) => ({
+            dataUrl: inputReferences[i],
+            filePath: item.filePath || item.url || '',
+          }))
           logEntry.status = 'success'
           logEntry.providerName = provider.name
           logEntry.model = openrouterPayload.model
-          logEntry.clientRequest = sanitizeForLog({ topicId, payload })
-          logEntry.upstreamRequest = sanitizeForLog(openrouterPayload)
-          logEntry.upstreamResponse = sanitizeForLog(response)
+          logEntry.clientRequest = sanitizeForLog(replaceReferenceDataUrls({ topicId, payload }, refUrlMap))
+          logEntry.upstreamRequest = sanitizeForLog(replaceReferenceDataUrls(openrouterPayload, refUrlMap))
+          logEntry.upstreamResponse = sanitizeForLog(replaceB64WithLocalPath(response, images))
           logEntry.clientResponse = sanitizeForLog(result)
+          // 提取生成的图片 URL 列表，供日志列表页直接展示缩略图
+          logEntry.resultFiles = (message.images || [])
+            .map((img) => ({
+              url: img.url || img.localPath || '',
+              mimeType: img.mimeType || 'image/png',
+              kind: 'image',
+            }))
+            .filter((f) => f.url)
           logEntry.durationMs = Date.now() - logStartTime
           await usageLogger.log(logEntry)
 
@@ -327,11 +343,16 @@ const app = createApp({
         }
       } catch (err) {
         // 记录使用日志（失败）：已捕获的阶段数据 + 错误信息
+        // 参考图 data URL → 落盘 filePath，避免 base64 膨胀（失败时无 images，b64_json 原样保留）
+        const refUrlMap = (draft.referenceImages || []).map((item, i) => ({
+          dataUrl: inputReferences[i],
+          filePath: item.filePath || item.url || '',
+        }))
         logEntry.status = 'error'
         logEntry.providerName = logEntry.providerName || ''
         logEntry.errorMessage = err?.message || String(err)
-        logEntry.clientRequest = sanitizeForLog({ topicId, payload })
-        if (openrouterPayload) logEntry.upstreamRequest = sanitizeForLog(openrouterPayload)
+        logEntry.clientRequest = sanitizeForLog(replaceReferenceDataUrls({ topicId, payload }, refUrlMap))
+        if (openrouterPayload) logEntry.upstreamRequest = sanitizeForLog(replaceReferenceDataUrls(openrouterPayload, refUrlMap))
         if (response) logEntry.upstreamResponse = sanitizeForLog(response)
         logEntry.durationMs = Date.now() - logStartTime
         await usageLogger.log(logEntry)

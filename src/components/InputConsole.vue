@@ -1,6 +1,6 @@
 <script setup>
 import { computed, h, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { ImagePlus, Send, Settings2, SlidersHorizontal } from 'lucide-vue-next'
+import { AlertTriangle, ImagePlus, Send, Settings2, SlidersHorizontal } from 'lucide-vue-next'
 import { NSelect } from 'naive-ui'
 import { requestImages } from '@/services/imageSession'
 import { requestVideo } from '@/services/videoSession'
@@ -181,6 +181,44 @@ function renderModelLabel(option) {
   return option.modelLabel
 }
 const canSend = computed(() => Boolean(draft.value.prompt.trim()) && !isLoading.value)
+
+/**
+ * 图像模型 prompt 长度警告阈值（两档）
+ *
+ * 依据 OpenAI 官方 API 文档：GPT Image 系列（gpt-image-1 / gpt-image-2）的 prompt
+ * 硬限制为 32,000 字符（dall-e-3 为 4,000，dall-e-2 为 1,000）。此处区分两档：
+ *
+ * - SOFT_LIMIT（15,000）：软提醒阈值。gpt-image-2 基于 thinking pipeline，能处理长
+ *   prompt，但超过此长度时生成质量可能下降（注意力分散、末尾指令易被淹没）。
+ *   仅提示用户，不阻断发送。
+ * - HARD_LIMIT（30,000）：硬限制警告阈值。接近 API 32,000 上限，继续追加可能被上游
+ *   直接拒绝（400 错误），强警告提示用户精简。
+ *
+ * 注意：早期版本误把 DALL-E 3 的 4,000 硬限制当作 GPT Image 系列的上限，导致正常
+ * 的长 prompt（如 8,000-10,000 字符）被误报。已按官方文档修正。
+ */
+const IMAGE_PROMPT_SOFT_LIMIT = 15000
+const IMAGE_PROMPT_HARD_LIMIT = 30000
+
+/** 当前 prompt 字符数 */
+const promptLength = computed(() => draft.value.prompt.length)
+
+/**
+ * prompt 超长警告等级（仅图像模型检查）
+ *
+ * - null：未超长，不显示警告
+ * - 'soft'：超过 SOFT_LIMIT，提示可能影响生成质量（不阻断发送）
+ * - 'hard'：超过 HARD_LIMIT，接近 API 32,000 硬限制，可能被上游拒绝
+ *
+ * 视频模型不检查（prompt 结构不同，且视频模型 prompt 通常更短）。
+ * @returns {null | 'soft' | 'hard'}
+ */
+const promptWarnLevel = computed(() => {
+  if (isVideoModel.value) return null
+  if (promptLength.value > IMAGE_PROMPT_HARD_LIMIT) return 'hard'
+  if (promptLength.value > IMAGE_PROMPT_SOFT_LIMIT) return 'soft'
+  return null
+})
 
 /**
  * 把比例字符串（如 "4:3"）转为 CSS aspect-ratio 值（如 "4 / 3"），
@@ -401,28 +439,32 @@ async function handleSend() {
   }
 
   const prompt = draft.value.prompt.trim()
+  // 在任何 await 之前捕获 draft 快照与模型类型，避免 await 期间切换主题
+  // 导致 draft.value 指向新主题（参数/参考图错位）、甚至 isVideoModel 翻转走错生成分支
+  const draftSnapshot = { ...draft.value }
+  const wasVideoModel = isVideoModel.value
   isLoading.value = true
   let originTopicId = ''
 
   try {
     originTopicId = await chatStore.addUserPrompt(prompt)
-    if (isVideoModel.value) {
+    if (wasVideoModel) {
       // 视频生成：调 video 接口（后端轮询），完成后追加 assistant_videos 消息
       const result = await requestVideo(originTopicId, {
         prompt,
-        draft: { ...draft.value },
+        draft: draftSnapshot,
       })
       await chatStore.completeVideoGeneration(result, prompt, originTopicId)
     } else {
       // 图像生成：原有逻辑
       const result = await requestImages(originTopicId, {
         prompt,
-        draft: { ...draft.value },
+        draft: draftSnapshot,
       })
       await chatStore.completeImageGeneration(result, prompt, originTopicId)
     }
   } catch (error) {
-    if (isVideoModel.value) {
+    if (wasVideoModel) {
       chatStore.failVideoGeneration(error, originTopicId)
     } else {
       chatStore.failImageGeneration(error, originTopicId)
@@ -550,6 +592,23 @@ async function handleSend() {
         @keydown="handlePromptKeydown"
         @paste="handlePaste"
       ></textarea>
+    </div>
+
+    <!-- prompt 超长警告（两档）：软提醒(>15k)琥珀色 / 硬限制(>30k)红色 -->
+    <div
+      v-if="promptWarnLevel"
+      class="prompt-warn"
+      :class="{ 'prompt-warn--hard': promptWarnLevel === 'hard' }"
+      data-role="prompt-warn"
+      :data-level="promptWarnLevel"
+    >
+      <AlertTriangle :size="13" />
+      <span v-if="promptWarnLevel === 'soft'">
+        提示词较长（{{ promptLength }} 字符），超长 prompt 可能影响生成质量，建议精简至 {{ IMAGE_PROMPT_SOFT_LIMIT }} 字符以内
+      </span>
+      <span v-else>
+        提示词过长（{{ promptLength }} 字符），已接近 API 上限（{{ IMAGE_PROMPT_HARD_LIMIT }} 字符），可能被上游拒绝，请精简
+      </span>
     </div>
 
     <div class="toolbar">
@@ -817,6 +876,32 @@ async function handleSend() {
     &::placeholder {
       color: $text-muted;
     }
+  }
+}
+
+/* prompt 超长警告条：业务风格，无渐变，3px 圆角。
+   软提醒(>15k)琥珀色 / 硬限制(>30k)红色，两档区分严重程度。 */
+.prompt-warn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 3px;
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.25);
+  color: #f59e0b;
+  font-size: 12px;
+  line-height: 1.5;
+
+  svg {
+    flex-shrink: 0;
+  }
+
+  /* 硬限制档：红色强警告，接近 API 32,000 上限可能被拒 */
+  &--hard {
+    background: rgba(239, 68, 68, 0.12);
+    border-color: rgba(239, 68, 68, 0.3);
+    color: #ef4444;
   }
 }
 

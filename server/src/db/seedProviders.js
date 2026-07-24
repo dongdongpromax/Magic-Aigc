@@ -201,6 +201,15 @@ export async function migrateProvidersSchema(pool) {
     created_at BIGINT NOT NULL,
     INDEX idx_usage_logs_created (created_at DESC)
   )`)
+
+  // 幂等添加 result_files 列：存储生成的图片/视频 URL 列表，供列表页直接展示缩略图
+  const [resultFilesCol] = await pool.query(
+    `SELECT COUNT(*) AS cnt FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'usage_logs' AND COLUMN_NAME = 'result_files'`,
+  )
+  if (resultFilesCol[0].cnt === 0) {
+    await pool.query('ALTER TABLE usage_logs ADD COLUMN result_files JSON NULL')
+  }
 }
 
 /**
