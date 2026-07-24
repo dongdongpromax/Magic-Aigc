@@ -15,12 +15,15 @@ import {
   PRESET_PROVIDERS,
 } from './db/seedProviders.js'
 import { createProvidersRepository } from './db/repositories/providersRepository.js'
+import { createUsageLogRepository } from './db/repositories/usageLogRepository.js'
 import { runTransaction } from './db/transaction.js'
 import { createFileStorage } from './modules/images/fileStorage.js'
 import { createUpstreamClient } from './modules/providers/upstreamClient.js'
 import { createProvidersService } from './modules/providers/providersService.js'
 import { buildImagePayload } from './modules/providers/imagePayload.js'
 import { createVideoService } from './modules/videos/videoService.js'
+import { createUsageLogger } from './modules/logs/usageLogger.js'
+import { sanitizeForLog } from './modules/logs/logSanitizer.js'
 
 const env = getServerEnv()
 const pool = createPool(env)
@@ -116,6 +119,8 @@ try {
 const topicRepository = createTopicRepository(pool)
 const draftRepository = createDraftRepository(pool)
 const providersRepository = createProvidersRepository(pool)
+const usageLogRepository = createUsageLogRepository(pool)
+const usageLogger = createUsageLogger({ usageLogRepository })
 const upstreamClient = createUpstreamClient()
 const providersService = createProvidersService({
   providersRepository,
@@ -133,6 +138,7 @@ const videoService = createVideoService({
   pool,
   runTransaction,
   storageRoot,
+  usageLogger,
 })
 
 const app = createApp({
@@ -141,6 +147,7 @@ const app = createApp({
   draftRepository,
   providersService,
   videoService,
+  usageLogRepository,
   // P1-6: 健康检查注入，/api/health 会调用此函数探测 DB
   healthCheck: async () => verifyDatabaseConnection(pool),
   imageService: {
@@ -213,83 +220,121 @@ const app = createApp({
      *
      * 事务边界：saveGeneratedConversation + clearReferenceImages + saveDraft 三步原子化
      * 文件清理：先写盘再开事务，DB 失败时 best-effort unlink 已写文件
+     * 使用日志：记录完整 4 阶段数据（前端请求→上游请求→上游响应→前端响应），best-effort 不阻断主流程
      */
     async generateImageMessage(topicId, payload) {
-      const settings = await settingsRepository.getSettings()
-      const draft = payload.draft || {}
-      const inputReferences = await Promise.all(
-        (draft.referenceImages || []).map((item) => resolveReferenceInput(fileStorage, item)),
-      )
+      const logStartTime = Date.now()
+      // 提前声明以便 catch 块也能访问已捕获的数据
+      let openrouterPayload = null
+      let response = null
+      const logEntry = {
+        type: 'image',
+        topicId,
+        prompt: payload.prompt || payload.draft?.prompt || '',
+        model: payload.draft?.model || '',
+      }
 
-      // 按 draft.providerId 解析中转站（含 default_provider_id → 第一个 enabled 回退链）
-      const provider = await providersService.resolveForDraft(draft.providerId)
-
-      const openrouterPayload = buildImagePayload({
-        model: draft.model || settings.defaultModel,
-        prompt: payload.prompt || draft.prompt || '',
-        size: draft.size || settings.defaultSize,
-        quality: draft.quality || settings.defaultQuality,
-        n: draft.n || settings.defaultN,
-        inputReferences,
-      })
-
-      // API 调用失败时还没写文件，无需清理
-      const response = await upstreamClient.generateImages(provider, openrouterPayload, settings.timeout)
-
-      // 文件先写盘（b64 太大不便在事务里持连接），记录所有成功写入的路径
-      const writtenPaths = []
-      let images
       try {
-        images = await Promise.all(
-          (response.data || []).map(async (item, index) => {
-            const fileName = buildGeneratedFileName(topicId, index)
-            const savedToProject = Boolean(item.b64_json)
-            const localPath = savedToProject
-              ? await fileStorage.writeGeneratedBase64(fileName, item.b64_json)
-              : ''
-
-            if (localPath) writtenPaths.push(localPath)
-
-            return {
-              url: localPath || item.url,
-              localPath,
-              fileName,
-              mimeType: 'image/png',
-              width: item.width || null,
-              height: item.height || null,
-              savedToProject,
-              b64: '',
-            }
-          }),
+        const settings = await settingsRepository.getSettings()
+        const draft = payload.draft || {}
+        const inputReferences = await Promise.all(
+          (draft.referenceImages || []).map((item) => resolveReferenceInput(fileStorage, item)),
         )
 
-        // 三步 DB 操作合并到一个事务，任一失败全回滚
-        const message = await runTransaction(pool, async (conn) => {
-          const saved = await topicRepository.saveGeneratedConversation(
-            {
-              topicId,
-              prompt: payload.prompt || '',
-              revisedPrompt: response.revised_prompt || '',
-              draft: { ...draft, providerName: provider.name },
-              images,
-            },
-            conn,
-          )
-          await draftRepository.clearReferenceImages(topicId, conn)
-          await draftRepository.saveDraft(topicId, { ...draft, prompt: '' }, conn)
-          return saved
+        // 按 draft.providerId 解析中转站（含 default_provider_id → 第一个 enabled 回退链）
+        const provider = await providersService.resolveForDraft(draft.providerId)
+
+        openrouterPayload = buildImagePayload({
+          model: draft.model || settings.defaultModel,
+          prompt: payload.prompt || draft.prompt || '',
+          size: draft.size || settings.defaultSize,
+          quality: draft.quality || settings.defaultQuality,
+          n: draft.n || settings.defaultN,
+          inputReferences,
         })
 
-        return {
-          images: message.images,
-          revisedPrompt: message.revisedPrompt,
-          providerName: provider.name,
+        // API 调用失败时还没写文件，无需清理
+        response = await upstreamClient.generateImages(provider, openrouterPayload, settings.timeout)
+
+        // 文件先写盘（b64 太大不便在事务里持连接），记录所有成功写入的路径
+        const writtenPaths = []
+        let images
+        try {
+          images = await Promise.all(
+            (response.data || []).map(async (item, index) => {
+              const fileName = buildGeneratedFileName(topicId, index)
+              const savedToProject = Boolean(item.b64_json)
+              const localPath = savedToProject
+                ? await fileStorage.writeGeneratedBase64(fileName, item.b64_json)
+                : ''
+
+              if (localPath) writtenPaths.push(localPath)
+
+              return {
+                url: localPath || item.url,
+                localPath,
+                fileName,
+                mimeType: 'image/png',
+                width: item.width || null,
+                height: item.height || null,
+                savedToProject,
+                b64: '',
+              }
+            }),
+          )
+
+          // 三步 DB 操作合并到一个事务，任一失败全回滚
+          const message = await runTransaction(pool, async (conn) => {
+            const saved = await topicRepository.saveGeneratedConversation(
+              {
+                topicId,
+                prompt: payload.prompt || '',
+                revisedPrompt: response.revised_prompt || '',
+                draft: { ...draft, providerName: provider.name },
+                images,
+              },
+              conn,
+            )
+            await draftRepository.clearReferenceImages(topicId, conn)
+            await draftRepository.saveDraft(topicId, { ...draft, prompt: '' }, conn)
+            return saved
+          })
+
+          const result = {
+            images: message.images,
+            revisedPrompt: message.revisedPrompt,
+            providerName: provider.name,
+          }
+
+          // 记录使用日志（成功）：4 阶段数据 + 耗时
+          logEntry.status = 'success'
+          logEntry.providerName = provider.name
+          logEntry.model = openrouterPayload.model
+          logEntry.clientRequest = sanitizeForLog({ topicId, payload })
+          logEntry.upstreamRequest = sanitizeForLog(openrouterPayload)
+          logEntry.upstreamResponse = sanitizeForLog(response)
+          logEntry.clientResponse = sanitizeForLog(result)
+          logEntry.durationMs = Date.now() - logStartTime
+          await usageLogger.log(logEntry)
+
+          return result
+        } catch (err) {
+          // DB 失败但文件已写 → best-effort 清理，避免孤儿文件
+          if (writtenPaths.length) {
+            await cleanupOrphanFiles(writtenPaths, storageRoot)
+          }
+          throw err
         }
       } catch (err) {
-        // DB 失败但文件已写 → best-effort 清理，避免孤儿文件
-        if (writtenPaths.length) {
-          await cleanupOrphanFiles(writtenPaths, storageRoot)
-        }
+        // 记录使用日志（失败）：已捕获的阶段数据 + 错误信息
+        logEntry.status = 'error'
+        logEntry.providerName = logEntry.providerName || ''
+        logEntry.errorMessage = err?.message || String(err)
+        logEntry.clientRequest = sanitizeForLog({ topicId, payload })
+        if (openrouterPayload) logEntry.upstreamRequest = sanitizeForLog(openrouterPayload)
+        if (response) logEntry.upstreamResponse = sanitizeForLog(response)
+        logEntry.durationMs = Date.now() - logStartTime
+        await usageLogger.log(logEntry)
         throw err
       }
     },

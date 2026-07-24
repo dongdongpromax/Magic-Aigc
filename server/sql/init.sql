@@ -106,3 +106,21 @@ CREATE TABLE IF NOT EXISTS provider_models (
 );
 
 ALTER TABLE drafts ADD COLUMN provider_id VARCHAR(64) NULL;
+
+CREATE TABLE IF NOT EXISTS usage_logs (
+  id VARCHAR(64) PRIMARY KEY,
+  topic_id VARCHAR(64) NULL,
+  type VARCHAR(20) NOT NULL,
+  status VARCHAR(20) NOT NULL,
+  provider_name VARCHAR(120) NULL,
+  model VARCHAR(120) NULL,
+  prompt TEXT NULL,
+  client_request JSON NULL,
+  upstream_request JSON NULL,
+  upstream_response JSON NULL,
+  client_response JSON NULL,
+  error_message TEXT NULL,
+  duration_ms INT NULL,
+  created_at BIGINT NOT NULL,
+  INDEX idx_usage_logs_created (created_at DESC)
+);

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import Sidebar from './Sidebar.vue'
 import { useChatStore } from '@/store/chat'
+import { createTestRouter } from '@/test/testRouter'
 
 // 阻断 chat.js 顶部的网络相关 import
 vi.mock('@/services/chatApi', () => ({
@@ -60,10 +61,12 @@ describe('Sidebar', () => {
   it('显示创作工坊并支持新建创作', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
+    const router = createTestRouter()
+    await router.isReady()
 
     const wrapper = mount(Sidebar, {
       global: {
-        plugins: [pinia],
+        plugins: [pinia, router],
       },
     })
 
@@ -97,8 +100,11 @@ describe('Sidebar', () => {
     ]
     store.currentTopicId = 'topic-1'
 
+    const router = createTestRouter()
+    await router.isReady()
+
     const wrapper = mount(Sidebar, {
-      global: { plugins: [pinia] },
+      global: { plugins: [pinia, router] },
     })
 
     // topic-item 内应存在删除按钮
@@ -128,8 +134,11 @@ describe('Sidebar', () => {
     // mock store.deleteTopic 避免真实 API 调用
     const deleteTopicSpy = vi.spyOn(store, 'deleteTopic').mockResolvedValue(undefined)
 
+    const router = createTestRouter()
+    await router.isReady()
+
     const wrapper = mount(Sidebar, {
-      global: { plugins: [pinia] },
+      global: { plugins: [pinia, router] },
     })
 
     await wrapper.find('[data-action="delete-topic"]').trigger('click')
@@ -168,8 +177,11 @@ describe('Sidebar', () => {
 
     const deleteTopicSpy = vi.spyOn(store, 'deleteTopic').mockResolvedValue(undefined)
 
+    const router = createTestRouter()
+    await router.isReady()
+
     const wrapper = mount(Sidebar, {
-      global: { plugins: [pinia] },
+      global: { plugins: [pinia, router] },
     })
 
     await wrapper.find('[data-action="delete-topic"]').trigger('click')
@@ -181,5 +193,25 @@ describe('Sidebar', () => {
 
     // 取消时不应调 deleteTopic
     expect(deleteTopicSpy).not.toHaveBeenCalled()
+  })
+
+  it('底部含使用日志入口，点击跳转 /logs', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const router = createTestRouter()
+    await router.isReady()
+
+    const wrapper = mount(Sidebar, {
+      global: { plugins: [pinia, router] },
+    })
+
+    const logsEntry = wrapper.find('[data-action="open-logs"]')
+    expect(logsEntry.exists()).toBe(true)
+    expect(logsEntry.text()).toContain('使用日志')
+
+    await logsEntry.trigger('click')
+    await flushPromises()
+
+    expect(router.currentRoute.value.path).toBe('/logs')
   })
 })

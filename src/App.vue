@@ -1,6 +1,5 @@
 <script setup>
 import { darkTheme, NConfigProvider, NMessageProvider } from 'naive-ui'
-import MainLayout from './components/MainLayout.vue'
 
 const themeOverrides = {
   common: {
@@ -15,7 +14,7 @@ const themeOverrides = {
 <template>
   <n-config-provider :theme="darkTheme" :theme-overrides="themeOverrides" class="provider-wrap">
     <n-message-provider>
-      <MainLayout />
+      <router-view />
     </n-message-provider>
   </n-config-provider>
 </template>

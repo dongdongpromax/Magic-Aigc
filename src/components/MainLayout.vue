@@ -1,7 +1,6 @@
 <script setup>
 import { computed } from 'vue'
 import Sidebar from './Sidebar.vue'
-import ChatArea from './ChatArea.vue'
 import { useChatStore } from '@/store/chat'
 
 const chatStore = useChatStore()
@@ -20,7 +19,7 @@ const isFullscreen = computed(() => chatStore.isChatFullscreen)
         <div class="particle-dust"></div>
         <div class="particle-vignette"></div>
       </div>
-      <ChatArea />
+      <router-view />
     </div>
   </div>
 </template>

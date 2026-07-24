@@ -2,6 +2,7 @@ import axios from 'axios'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { buildVideoPayload } from '../providers/videoPayload.js'
+import { sanitizeForLog } from '../logs/logSanitizer.js'
 
 /**
  * 视频生成服务
@@ -70,6 +71,7 @@ async function cleanupOrphanFiles(filePaths, rootDir) {
  *   pool: import('mysql2/promise').Pool;
  *   runTransaction: (pool: unknown, fn: (conn: unknown) => Promise<unknown>) => Promise<unknown>;
  *   storageRoot: string;
+ *   usageLogger?: object;
  * }} deps
  */
 export function createVideoService(deps) {
@@ -82,6 +84,7 @@ export function createVideoService(deps) {
     pool,
     runTransaction,
     storageRoot,
+    usageLogger,
   } = deps
 
   /**
@@ -155,93 +158,145 @@ export function createVideoService(deps) {
      * @returns {Promise<{ videos: Array<object>; providerName: string; ratio: string; duration: number; resolution: string }>}
      */
     async generateVideoMessage(topicId, payload) {
-      const draft = payload.draft || {}
-      const prompt = payload.prompt || draft.prompt || ''
-
-      // 1. 解析全部参考图为 data URL 数组（按 videoRefMode 派生 role 由 buildVideoPayload 负责）
-      const imageUrls = []
-      for (const ref of draft.referenceImages || []) {
-        imageUrls.push(await resolveReferenceInput(fileStorage, ref))
+      const logStartTime = Date.now()
+      // 提前声明以便 catch 块也能访问已捕获的数据
+      let videoPayload = null
+      let createTaskResponse = null
+      let finalTaskResponse = null
+      const logEntry = {
+        type: 'video',
+        topicId,
+        prompt: payload.prompt || payload.draft?.prompt || '',
+        model: payload.draft?.model || '',
       }
 
-      // 2. 按 draft.providerId 解析中转站（含 default_provider_id → 第一个 enabled 回退链）
-      const provider = await providersService.resolveForDraft(draft.providerId)
-
-      // 3. 构建 Seedance 请求体（videoRefMode + imageUrls 决定参考图 role 与数量）
-      const videoPayload = buildVideoPayload({
-        model: draft.model,
-        prompt,
-        ratio: draft.ratio,
-        duration: draft.duration,
-        resolution: draft.resolution,
-        videoRefMode: draft.videoRefMode,
-        imageUrls,
-      })
-
-      // 4. 创建异步任务（API 调用失败时还没写文件，无需清理）
-      const task = await upstreamClient.createVideoTask(provider, videoPayload)
-      const taskId = task?.id
-      if (!taskId) {
-        const err = new Error('上游未返回任务 ID')
-        err.status = 502
-        err.expose = true
-        throw err
-      }
-
-      // 5. 轮询直到终态（succeeded 才继续；失败/超时直接抛）
-      const finalTask = await pollUntilTerminal(provider, taskId)
-
-      // 6. 下载视频到本地（video_url 预签名 24h 有效，必须落盘）
-      const videoUrl = finalTask.content?.video_url
-      if (!videoUrl) {
-        const err = new Error('任务成功但未返回视频地址')
-        err.status = 502
-        err.expose = true
-        throw err
-      }
-      const video = await downloadVideoToLocal(videoUrl, topicId)
-
-      // 7. 事务内：保存消息 + 清参考图 + 重置草稿（三步原子化）
-      const writtenPaths = [video.localPath]
       try {
-        const message = await runTransaction(pool, async (conn) => {
-          const saved = await topicRepository.saveVideoConversation(
-            {
-              topicId,
-              prompt,
-              // 用规整后的 ratio/duration/resolution 落库（与实际发给上游的值一致），
-              // 避免刷新后从 meta 回读时与真实生成参数不一致
-              draft: {
-                ...draft,
-                providerName: provider.name,
-                ratio: videoPayload.ratio,
-                duration: videoPayload.duration,
-                resolution: videoPayload.resolution,
-                // 视频参考模式透传落库，供消息 meta 与 retry 回填使用
-                videoRefMode: draft.videoRefMode || 'first_frame',
-              },
-              videos: [video],
-              usage: finalTask.usage || null,
-            },
-            conn,
-          )
-          await draftRepository.clearReferenceImages(topicId, conn)
-          await draftRepository.saveDraft(topicId, { ...draft, prompt: '' }, conn)
-          return saved
+        const draft = payload.draft || {}
+        const prompt = payload.prompt || draft.prompt || ''
+
+        // 1. 解析全部参考图为 data URL 数组（按 videoRefMode 派生 role 由 buildVideoPayload 负责）
+        const imageUrls = []
+        for (const ref of draft.referenceImages || []) {
+          imageUrls.push(await resolveReferenceInput(fileStorage, ref))
+        }
+
+        // 2. 按 draft.providerId 解析中转站（含 default_provider_id → 第一个 enabled 回退链）
+        const provider = await providersService.resolveForDraft(draft.providerId)
+
+        // 3. 构建 Seedance 请求体（videoRefMode + imageUrls 决定参考图 role 与数量）
+        videoPayload = buildVideoPayload({
+          model: draft.model,
+          prompt,
+          ratio: draft.ratio,
+          duration: draft.duration,
+          resolution: draft.resolution,
+          videoRefMode: draft.videoRefMode,
+          imageUrls,
         })
 
-        return {
-          videos: message.videos,
-          providerName: provider.name,
-          ratio: videoPayload.ratio,
-          duration: videoPayload.duration,
-          resolution: videoPayload.resolution,
-          // 视频参考模式回传，供前端消息 meta 与 retry 回填使用
-          videoRefMode: draft.videoRefMode || 'first_frame',
+        // 4. 创建异步任务（API 调用失败时还没写文件，无需清理）
+        const task = await upstreamClient.createVideoTask(provider, videoPayload)
+        createTaskResponse = task
+        const taskId = task?.id
+        if (!taskId) {
+          const err = new Error('上游未返回任务 ID')
+          err.status = 502
+          err.expose = true
+          throw err
+        }
+
+        // 5. 轮询直到终态（succeeded 才继续；失败/超时直接抛）
+        const finalTask = await pollUntilTerminal(provider, taskId)
+        finalTaskResponse = finalTask
+
+        // 6. 下载视频到本地（video_url 预签名 24h 有效，必须落盘）
+        const videoUrl = finalTask.content?.video_url
+        if (!videoUrl) {
+          const err = new Error('任务成功但未返回视频地址')
+          err.status = 502
+          err.expose = true
+          throw err
+        }
+        const video = await downloadVideoToLocal(videoUrl, topicId)
+
+        // 7. 事务内：保存消息 + 清参考图 + 重置草稿（三步原子化）
+        const writtenPaths = [video.localPath]
+        try {
+          const message = await runTransaction(pool, async (conn) => {
+            const saved = await topicRepository.saveVideoConversation(
+              {
+                topicId,
+                prompt,
+                // 用规整后的 ratio/duration/resolution 落库（与实际发给上游的值一致），
+                // 避免刷新后从 meta 回读时与真实生成参数不一致
+                draft: {
+                  ...draft,
+                  providerName: provider.name,
+                  ratio: videoPayload.ratio,
+                  duration: videoPayload.duration,
+                  resolution: videoPayload.resolution,
+                  // 视频参考模式透传落库，供消息 meta 与 retry 回填使用
+                  videoRefMode: draft.videoRefMode || 'first_frame',
+                },
+                videos: [video],
+                usage: finalTask.usage || null,
+              },
+              conn,
+            )
+            await draftRepository.clearReferenceImages(topicId, conn)
+            await draftRepository.saveDraft(topicId, { ...draft, prompt: '' }, conn)
+            return saved
+          })
+
+          const result = {
+            videos: message.videos,
+            providerName: provider.name,
+            ratio: videoPayload.ratio,
+            duration: videoPayload.duration,
+            resolution: videoPayload.resolution,
+            // 视频参考模式回传，供前端消息 meta 与 retry 回填使用
+            videoRefMode: draft.videoRefMode || 'first_frame',
+          }
+
+          // 记录使用日志（成功）：4 阶段数据 + 耗时
+          if (usageLogger) {
+            logEntry.status = 'success'
+            logEntry.providerName = provider.name
+            logEntry.model = videoPayload.model
+            logEntry.clientRequest = sanitizeForLog({ topicId, payload })
+            logEntry.upstreamRequest = sanitizeForLog(videoPayload)
+            logEntry.upstreamResponse = sanitizeForLog({
+              createTaskResponse,
+              finalTaskResponse,
+            })
+            logEntry.clientResponse = sanitizeForLog(result)
+            logEntry.durationMs = Date.now() - logStartTime
+            await usageLogger.log(logEntry)
+          }
+
+          return result
+        } catch (err) {
+          // DB 失败但文件已落盘 → best-effort 清理，避免孤儿文件
+          await cleanupOrphanFiles(writtenPaths, storageRoot)
+          throw err
         }
       } catch (err) {
-        // DB 失败但文件已落盘 → best-effort 清理，避免孤儿文件
-        await cleanupOrphanFiles(writtenPaths, storageRoot)
+        // 记录使用日志（失败）：已捕获的阶段数据 + 错误信息
+        if (usageLogger) {
+          logEntry.status = 'error'
+          logEntry.providerName = logEntry.providerName || ''
+          logEntry.errorMessage = err?.message || String(err)
+          logEntry.clientRequest = sanitizeForLog({ topicId, payload })
+          if (videoPayload) logEntry.upstreamRequest = sanitizeForLog(videoPayload)
+          if (createTaskResponse || finalTaskResponse) {
+            logEntry.upstreamResponse = sanitizeForLog({
+              createTaskResponse,
+              finalTaskResponse,
+            })
+          }
+          logEntry.durationMs = Date.now() - logStartTime
+          await usageLogger.log(logEntry)
+        }
         throw err
       }
     },

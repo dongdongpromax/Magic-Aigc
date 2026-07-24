@@ -8,6 +8,7 @@ import { createProviderRoutes } from './modules/providers/routes.js'
 import { createVideoRoutes } from './modules/videos/routes.js'
 import { createSettingsRoutes } from './modules/settings/routes.js'
 import { createTopicRoutes } from './modules/topics/routes.js'
+import { createUsageLogRoutes } from './modules/logs/routes.js'
 
 /**
  * 判断错误是否属于客户端错误（可向调用方暴露消息）
@@ -36,6 +37,8 @@ function isClientError(error) {
  *   imageService?: object;
  *   topicService?: object;
  *   providersService?: object;
+ *   videoService?: object;
+ *   usageLogRepository?: object;
  *   healthCheck?: () => Promise<void>;
  * }} deps 依赖注入
  */
@@ -82,6 +85,10 @@ export function createApp(deps = {}) {
   // 视频生成路由：deps.videoService 未注入时（旧测试）跳过，保持向后兼容
   if (deps.videoService) {
     app.use('/api', createVideoRoutes({ videoService: deps.videoService }))
+  }
+  // 使用日志路由：deps.usageLogRepository 未注入时（旧测试）跳过，保持向后兼容
+  if (deps.usageLogRepository) {
+    app.use('/api', createUsageLogRoutes({ usageLogRepository: deps.usageLogRepository }))
   }
 
   // P0-6: 错误处理中间件分类脱敏
