@@ -14,12 +14,13 @@ function createMemoryRouter() {
 }
 
 describe('router 配置', () => {
-  it('根路径 / 重定向到 /chat', async () => {
+  it('根路径 / 命名为 home，渲染门户首页', async () => {
     const router = createMemoryRouter()
     await router.push('/')
     await router.isReady()
 
-    expect(router.currentRoute.value.path).toBe('/chat')
+    expect(router.currentRoute.value.path).toBe('/')
+    expect(router.currentRoute.value.name).toBe('home')
   })
 
   it('/chat 命名路由为 chat，含 chat-content 子路由', async () => {
