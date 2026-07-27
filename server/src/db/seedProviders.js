@@ -210,6 +210,13 @@ export async function migrateProvidersSchema(pool) {
   if (resultFilesCol[0].cnt === 0) {
     await pool.query('ALTER TABLE usage_logs ADD COLUMN result_files JSON NULL')
   }
+
+  // 幂等迁移：把存量 app_settings.timeout 从旧默认值 1200000（20 分钟）升到 1800000（30 分钟）
+  // 仅更新值为 1200000 或 NULL 的行，不影响用户手动设置的其他值（如 3600000）
+  // 解决：旧部署的数据库 timeout 仍为 20 分钟，导致图像/视频生成被过早掐断
+  await pool.query(
+    'UPDATE app_settings SET timeout = 1800000 WHERE timeout = 1200000 OR timeout IS NULL',
+  )
 }
 
 /**
@@ -285,7 +292,7 @@ export async function seedProvidersIfEmpty(pool, deps = {}) {
   await pool.query(
     `INSERT INTO app_settings
       (id, base_url, default_model, default_size, default_quality, default_n, request_mode, timeout, default_provider_id)
-     VALUES (1, 'https://openrouter.ai/api/v1', ?, 'auto', 'high', 1, 'openrouter-image', 1200000, 'openrouter')
+     VALUES (1, 'https://openrouter.ai/api/v1', ?, 'auto', 'high', 1, 'openrouter-image', 1800000, 'openrouter')
      ON DUPLICATE KEY UPDATE default_provider_id = 'openrouter'`,
     [legacyDefaultModel || 'openai/gpt-image-2'],
   )

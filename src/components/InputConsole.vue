@@ -2,8 +2,6 @@
 import { computed, h, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { AlertTriangle, ImagePlus, Send, Settings2, SlidersHorizontal } from 'lucide-vue-next'
 import { NSelect } from 'naive-ui'
-import { requestImages } from '@/services/imageSession'
-import { requestVideo } from '@/services/videoSession'
 import { uploadReferenceImages } from '@/services/uploadApi'
 import { useChatStore } from '@/store/chat'
 import { useProvidersStore } from '@/store/providers'
@@ -19,7 +17,8 @@ import ConfirmDialog from './ConfirmDialog.vue'
 
 const chatStore = useChatStore()
 const providersStore = useProvidersStore()
-const isLoading = ref(false)
+// 生成中状态读 store（替代本地 isLoading），与「重试」共用同一把锁防止并发生成
+const isLoading = computed(() => chatStore.isGenerating)
 // 统一参数面板显隐（收纳图像的尺寸/张数、视频的比例/时长/清晰度）
 const isParamPanelVisible = ref(false)
 // 参数面板容器 ref，用于 click-outside 检测
@@ -419,8 +418,11 @@ function handleConfirmSubmit() {
 /**
  * 发送生成请求
  *
- * 改动5: 捕获发起时的 originTopicId，传给 completeImageGeneration/failImageGeneration，
- * 保证生成中切换主题后结果仍正确归位发起主题，不污染其他主题草稿。
+ * 生成流程编排（addUserPrompt → requestImages/requestVideo → complete/fail）
+ * 已抽取到 chatStore.runGeneration，此处只负责校验 + 捕获快照 + 调用。
+ *
+ * 快照在 await 之前捕获，避免 await 期间切换主题导致 draft.value 指向新主题
+ * （参数/参考图错位）、甚至 isVideoModel 翻转走错生成分支。
  */
 async function handleSend() {
   if (!draft.value.prompt.trim() || isLoading.value) return
@@ -439,39 +441,9 @@ async function handleSend() {
   }
 
   const prompt = draft.value.prompt.trim()
-  // 在任何 await 之前捕获 draft 快照与模型类型，避免 await 期间切换主题
-  // 导致 draft.value 指向新主题（参数/参考图错位）、甚至 isVideoModel 翻转走错生成分支
-  const draftSnapshot = { ...draft.value }
-  const wasVideoModel = isVideoModel.value
-  isLoading.value = true
-  let originTopicId = ''
-
-  try {
-    originTopicId = await chatStore.addUserPrompt(prompt)
-    if (wasVideoModel) {
-      // 视频生成：调 video 接口（后端轮询），完成后追加 assistant_videos 消息
-      const result = await requestVideo(originTopicId, {
-        prompt,
-        draft: draftSnapshot,
-      })
-      await chatStore.completeVideoGeneration(result, prompt, originTopicId)
-    } else {
-      // 图像生成：原有逻辑
-      const result = await requestImages(originTopicId, {
-        prompt,
-        draft: draftSnapshot,
-      })
-      await chatStore.completeImageGeneration(result, prompt, originTopicId)
-    }
-  } catch (error) {
-    if (wasVideoModel) {
-      chatStore.failVideoGeneration(error, originTopicId)
-    } else {
-      chatStore.failImageGeneration(error, originTopicId)
-    }
-  } finally {
-    isLoading.value = false
-  }
+  // 在任何 await 之前捕获 draft 快照，交给 runGeneration 编排生成流程
+  const draftSnapshot = { ...draft.value, referenceImages: [...(draft.value.referenceImages || [])] }
+  await chatStore.runGeneration(prompt, draftSnapshot)
 }
 </script>
 
@@ -588,7 +560,7 @@ async function handleSend() {
       <textarea
         v-model="draft.prompt"
         :placeholder="isVideoModel ? '描述你想要的视频画面，或上传参考图让画面动起来' : '描述你想要生成的内容，或基于上一张图继续细化（可直接粘贴图片作为参考图）'"
-        rows="3"
+        rows="5"
         @keydown="handlePromptKeydown"
         @paste="handlePaste"
       ></textarea>
@@ -778,6 +750,9 @@ async function handleSend() {
         </label>
       </div>
 
+      <!-- 当前输入框字符数：常驻显示，让用户随时感知 prompt 长度 -->
+      <span class="char-counter" data-role="char-counter">{{ promptLength }} 字</span>
+
       <button
         class="send-btn"
         :class="{ active: canSend }"
@@ -869,7 +844,8 @@ async function handleSend() {
     resize: vertical;
     outline: none;
     padding: 5px 0;
-    min-height: 72px;
+    // 默认高度调高，给长 prompt 更多书写空间
+    min-height: 120px;
     max-height: 50vh;
     font-family: inherit;
 
@@ -910,6 +886,17 @@ async function handleSend() {
   justify-content: space-between;
   align-items: center;
   gap: 12px;
+}
+
+/* 输入框字符数：常驻显示在工具栏右侧（发送按钮左侧），克制小字、不抢视觉 */
+.char-counter {
+  margin-left: auto;
+  align-self: center;
+  font-size: 11px;
+  color: $text-muted;
+  white-space: nowrap;
+  padding: 0 4px;
+  font-variant-numeric: tabular-nums;
 }
 
 .left-tools {

@@ -224,7 +224,7 @@ describe('buildImagePayload', () => {
     expect('resolution' in payload).toBe(false)
   })
 
-  it('非 auto 尺寸换算为 resolution + aspect_ratio（约分）', () => {
+  it('非 auto 尺寸映射为 aspect_ratio 枚举 + resolution 档位（不传像素串、不约分）', () => {
     const payload = buildImagePayload({
       model: 'openai/gpt-image-2',
       prompt: 'p',
@@ -232,11 +232,13 @@ describe('buildImagePayload', () => {
       quality: 'high',
       n: 2,
     })
-    expect(payload.resolution).toBe('1536x864')
+    // aspect_ratio 必须是合法枚举值，resolution 必须是档位（不可传像素串）
     expect(payload.aspect_ratio).toBe('16:9')
+    expect(payload.resolution).toBe('2K')
+    expect(payload.resolution).not.toBe('1536x864')
   })
 
-  it('有参考图时带 input_references', () => {
+  it('有参考图时带 input_references（{type,image_url:{url}} 对象数组）', () => {
     const payload = buildImagePayload({
       model: 'm',
       prompt: 'p',
@@ -245,6 +247,8 @@ describe('buildImagePayload', () => {
       n: 1,
       inputReferences: ['data:image/png;base64,x'],
     })
-    expect(payload.input_references).toEqual(['data:image/png;base64,x'])
+    expect(payload.input_references).toEqual([
+      { type: 'image_url', image_url: { url: 'data:image/png;base64,x' } },
+    ])
   })
 })

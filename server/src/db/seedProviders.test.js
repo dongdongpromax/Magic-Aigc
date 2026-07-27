@@ -46,6 +46,20 @@ describe('migrateProvidersSchema', () => {
     const sqls = pool.calls.map((c) => c.sql).join('\n')
     expect(sqls).not.toContain('ALTER TABLE')
   })
+
+  it('迁移：把存量 app_settings.timeout 从 1200000 升到 1800000', async () => {
+    const pool = createMockPool([[/information_schema/, [{ cnt: 1 }]]])
+
+    await migrateProvidersSchema(pool)
+
+    // 应执行 UPDATE app_settings SET timeout = 1800000 WHERE timeout = 1200000 OR timeout IS NULL
+    const updateCall = pool.calls.find(
+      (c) => /UPDATE app_settings SET timeout/.test(c.sql),
+    )
+    expect(updateCall).toBeTruthy()
+    expect(updateCall.sql).toContain('1800000')
+    expect(updateCall.sql).toContain('1200000')
+  })
 })
 
 describe('seedProvidersIfEmpty', () => {

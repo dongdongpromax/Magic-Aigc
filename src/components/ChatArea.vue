@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Maximize2, Minimize2 } from 'lucide-vue-next'
 import { useChatStore } from '@/store/chat'
 import { triggerBrowserDownload } from '@/utils/download'
@@ -15,6 +15,53 @@ const chatStore = useChatStore()
 const currentMessages = computed(() => {
   return chatStore.currentMessages
 })
+
+/**
+ * 消息列表滚动控制
+ *
+ * 切换到历史会话时，默认定位到最近一条消息（滚到底部），而非停留在顶部。
+ * 新增消息（生成中/生成完成）时，仅在用户已接近底部的情况下自动跟随，
+ * 避免用户主动上滑查阅历史时被强制拉回底部。
+ */
+const messagesContainerRef = ref(null)
+// 切换主题后待强制滚到底的标记（由 currentTopicId 变化置位，消息渲染后消费）
+let pendingScrollToBottom = false
+
+/** 把消息容器滚动到底部（定位到最近一条记录） */
+function scrollToBottom() {
+  const el = messagesContainerRef.value
+  if (!el) return
+  el.scrollTop = el.scrollHeight
+}
+
+/** 用户当前是否停在接近底部的位置（用于新增消息时判断是否跟随） */
+function isNearBottom() {
+  const el = messagesContainerRef.value
+  if (!el) return true
+  return el.scrollHeight - el.scrollTop - el.clientHeight < 120
+}
+
+// 切换主题：置位「待滚到底」，等该主题消息加载并渲染后再消费
+watch(
+  () => chatStore.currentTopicId,
+  () => {
+    pendingScrollToBottom = true
+  },
+)
+
+// 消息列表变化：主题切换后强制滚到底；否则仅在接近底部时跟随新消息
+watch(
+  currentMessages,
+  () => {
+    // flush:post 确保在 DOM 更新后执行；容器未渲染（空会话）时跳过，等有内容再处理
+    if (!messagesContainerRef.value) return
+    if (pendingScrollToBottom || isNearBottom()) {
+      scrollToBottom()
+    }
+    pendingScrollToBottom = false
+  },
+  { flush: 'post' },
+)
 
 /**
  * P0-7: 「继续细化」——把消息的图片设为参考图，并把 prompt 设为该消息的 prompt
@@ -59,6 +106,36 @@ const handleRetry = (message) => {
 }
 
 /**
+ * 「重试」——用户消息专用，用该消息的草稿快照还原参数后直接重新发送
+ *
+ * 与「再次生成」的区别：再次生成仅回填参数需手动点发送；
+ * 重试还原草稿后立即调 runGeneration 触发生成，无需手动操作。
+ *
+ * 用户消息创建时已快照完整草稿（createUserPromptMessage 的 draftSnapshot），
+ * 含 prompt + model + providerId + 参数 + 参考图，可直接还原复用。
+ *
+ * @param {{ prompt?: string; draftSnapshot?: object }} message 历史用户消息
+ */
+const handleDirectRetry = async (message) => {
+  if (chatStore.isGenerating) return
+  const snapshot = message.draftSnapshot
+  if (!snapshot) return
+
+  // 还原草稿让输入框显示被重试的 prompt 与参数（同步操作，无竞态）
+  chatStore.restoreDraft(snapshot)
+
+  const prompt = (message.prompt || snapshot.prompt || '').trim()
+  if (!prompt) return
+
+  // 捕获快照传给 runGeneration（深拷贝参考图防引用共享）
+  const draftSnapshot = {
+    ...snapshot,
+    referenceImages: (snapshot.referenceImages || []).map((img) => ({ ...img })),
+  }
+  await chatStore.runGeneration(prompt, draftSnapshot)
+}
+
+/**
  * P0-7: 「设为参考图」——调 store action 持久化到后端
  */
 const handleReference = (message) => {
@@ -90,6 +167,14 @@ const handleDownloadVideo = async (message) => {
     dataUrl: video.url,
     fileName: `${chatStore.currentTopicId || 'video'}-${Date.now()}.mp4`,
   })
+}
+
+/**
+ * 检查 pending 视频任务状态
+ * 用户在 pending 卡片上点「检查状态」时触发，调 store action 回查上游任务
+ */
+const handleCheckPending = async (message) => {
+  await chatStore.checkPendingVideoMessage(message)
 }
 
 /**
@@ -131,7 +216,7 @@ onBeforeUnmount(() => {
       </button>
     </div>
 
-    <div class="messages-container" v-if="currentMessages.length > 0">
+    <div class="messages-container" ref="messagesContainerRef" v-if="currentMessages.length > 0">
       <template v-for="message in currentMessages" :key="message.id">
         <ImageMessageCard
           v-if="message.type === 'assistant_images'"
@@ -147,8 +232,9 @@ onBeforeUnmount(() => {
           @refine="handleRefine"
           @retry="handleRetry"
           @download="handleDownloadVideo"
+          @check-pending="handleCheckPending"
         />
-        <MessageBubble v-else :message="message" />
+        <MessageBubble v-else :message="message" @retry="handleDirectRetry" />
       </template>
     </div>
 

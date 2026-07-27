@@ -27,7 +27,7 @@ export function createSettingsRepository(pool) {
             defaultQuality: 'high',
             defaultN: 1,
             requestMode: 'openrouter-image',
-            timeout: 1200000,
+            timeout: 1800000,
             defaultProviderId: '',
             defaultRatio: '16:9',
             defaultDuration: 5,
@@ -45,7 +45,7 @@ export function createSettingsRepository(pool) {
         defaultN: payload.defaultN || 1,
         // P1-1: 与前端 env.js 默认值和 SettingsDrawer 选项对齐
         requestMode: payload.requestMode || 'openrouter-image',
-        timeout: payload.timeout || 1200000,
+        timeout: payload.timeout || 1800000,
         defaultProviderId: payload.defaultProviderId || '',
         // 视频模型默认参数（通用设置按模型类型分区持久化）
         defaultRatio: payload.defaultRatio || '16:9',

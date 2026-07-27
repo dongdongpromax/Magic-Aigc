@@ -27,10 +27,11 @@ describe('VideoMessageCard', () => {
     const video = wrapper.get('video')
     expect(video.attributes('src')).toBe('/files/generated/demo.mp4')
     expect(video.attributes('controls')).toBeDefined()
-    // 三个动作按钮（视频不支持「设为首帧」）
+    // 四个动作按钮：继续细化 / 再次生成 / 下载视频 / 复制（视频不支持「设为首帧」）
     expect(wrapper.text()).toContain('继续细化')
     expect(wrapper.text()).toContain('再次生成')
     expect(wrapper.text()).toContain('下载视频')
+    expect(wrapper.text()).toContain('复制')
     expect(wrapper.text()).not.toContain('设为首帧')
   })
 
@@ -96,7 +97,7 @@ describe('VideoMessageCard', () => {
     })
 
     const buttons = wrapper.findAll('.action-row button')
-    expect(buttons).toHaveLength(3)
+    expect(buttons).toHaveLength(4)
 
     await buttons[0].trigger('click')
     expect(wrapper.emitted('refine')).toBeTruthy()
@@ -104,5 +105,89 @@ describe('VideoMessageCard', () => {
     expect(wrapper.emitted('retry')).toBeTruthy()
     await buttons[2].trigger('click')
     expect(wrapper.emitted('download')).toBeTruthy()
+    // 第 4 个为复制按钮（内部写剪贴板，不 emit 事件）
+    expect(buttons[3].attributes('data-action')).toBe('copy')
+    expect(buttons[3].text()).toBe('复制')
+  })
+
+  // ===== pending 状态渲染 =====
+
+  it('pending 状态渲染占位横幅而非视频播放器', () => {
+    const wrapper = mount(VideoMessageCard, {
+      props: {
+        message: {
+          status: 'pending',
+          videos: [],
+          model: 'doubao-seedance-2-0-260128',
+          meta: { providerName: '火山方舟', status: 'pending', taskId: 'cgt-1' },
+        },
+      },
+    })
+
+    // 占位横幅存在
+    expect(wrapper.find('[data-role="pending-banner"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('视频仍在后台生成中')
+    // 不渲染视频播放器
+    expect(wrapper.find('video').exists()).toBe(false)
+  })
+
+  it('pending 状态只显示「检查状态」+「复制」按钮，不显示下载/细化/再次生成', () => {
+    const wrapper = mount(VideoMessageCard, {
+      props: {
+        message: {
+          status: 'pending',
+          videos: [],
+          model: 'doubao-seedance-2-0-260128',
+        },
+      },
+    })
+
+    const buttons = wrapper.findAll('.action-row button')
+    // 仅 2 个按钮：检查状态 + 复制
+    expect(buttons).toHaveLength(2)
+    expect(buttons[0].attributes('data-action')).toBe('check-pending')
+    expect(buttons[0].text()).toBe('检查状态')
+    expect(buttons[1].attributes('data-action')).toBe('copy')
+    // 不显示正常操作栏按钮
+    expect(wrapper.text()).not.toContain('下载视频')
+    expect(wrapper.text()).not.toContain('继续细化')
+    expect(wrapper.text()).not.toContain('再次生成')
+  })
+
+  it('点击「检查状态」emit check-pending 事件并携带原消息', async () => {
+    const wrapper = mount(VideoMessageCard, {
+      props: {
+        message: {
+          id: 'msg-pending',
+          status: 'pending',
+          videos: [],
+          model: 'doubao-seedance-2-0-260128',
+        },
+      },
+    })
+
+    await wrapper.get('[data-action="check-pending"]').trigger('click')
+
+    expect(wrapper.emitted('check-pending')).toBeTruthy()
+    expect(wrapper.emitted('check-pending')[0][0]).toMatchObject({
+      id: 'msg-pending',
+      status: 'pending',
+    })
+  })
+
+  it('meta.status=pending 也能识别为 pending（reload 后从 DB 读取）', () => {
+    const wrapper = mount(VideoMessageCard, {
+      props: {
+        message: {
+          // 无顶层 status 字段，仅 meta.status
+          videos: [],
+          model: 'doubao-seedance-2-0-260128',
+          meta: { status: 'pending' },
+        },
+      },
+    })
+
+    expect(wrapper.find('[data-role="pending-banner"]').exists()).toBe(true)
+    expect(wrapper.find('[data-action="check-pending"]').exists()).toBe(true)
   })
 })

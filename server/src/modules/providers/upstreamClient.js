@@ -6,19 +6,52 @@ import axios from 'axios'
  * 职责：
  * - 代理调用 OpenAI 兼容端点（GET /models、POST /images）
  * - 多 Key 轮询：进程内游标 Map<providerId, number>，每次请求自增取模
- * - 单把 Key 401/403 时自动换下一把重试；全部失败抛友好错误
+ * - 单把 Key 401 时自动换下一把重试；全部失败抛友好错误
+ * - 403 不视为认证错误：可能是地区限制/内容违规等非密钥原因，
+ *   直接透传上游真实错误信息（expose:true），不触发密钥轮询
  *
  * 注意：Key 永不离开本模块进入日志或错误消息（仅 checkKeys 返回脱敏尾号）
  */
 
 /**
  * 判断是否为可换 Key 重试的认证类错误
+ *
+ * 仅 401 视为密钥失效/无效，触发轮询换下一把 Key 重试。
+ * 403 不在此列：403 通常是地区限制、模型权限不足或内容违规等非密钥原因，
+ * 换 Key 无济于事，反而会浪费所有 Key 并掩盖真实原因。
  * @param {unknown} err
  * @returns {boolean}
  */
 function isAuthError(err) {
   const status = err?.response?.status
-  return status === 401 || status === 403
+  return status === 401
+}
+
+/**
+ * 从上游错误响应中提取用户可读的真实原因
+ *
+ * OpenRouter 错误响应常见结构：{ error: { message, code } } 或 { message }
+ * 优先取嵌套的 error.message，回退到顶层 message，最后回退到 axios 默认 message
+ * @param {unknown} err
+ * @returns {string}
+ */
+function extractUpstreamMessage(err) {
+  const data = err?.response?.data
+  if (data?.error?.message) return data.error.message
+  if (typeof data?.message === 'string') return data.message
+  return err?.message || '上游请求失败'
+}
+
+/**
+ * 构造 403 透传错误（expose:true 让 app.js 错误中间件把真实原因回传前端）
+ * @param {unknown} err 原始 axios 错误
+ * @returns {Error}
+ */
+function buildForbiddenError(err) {
+  const friendly = new Error(extractUpstreamMessage(err))
+  friendly.status = 403
+  friendly.expose = true
+  return friendly
 }
 
 /**
@@ -41,7 +74,7 @@ export function createUpstreamClient() {
 
   /**
    * 带 Key 轮询的请求执行器：
-   * 每把 Key 最多试一次；401/403 换下一把；其余错误直接抛
+   * 每把 Key 最多试一次；401 换下一把；403 透传上游真实原因（不换 Key）；其余错误直接抛
    * @param {{ id: string; name: string; apiKeys: Array<string> }} provider
    * @param {(key: string) => Promise<unknown>} fn 用指定 Key 发请求的函数
    * @returns {Promise<unknown>}
@@ -61,7 +94,11 @@ export function createUpstreamClient() {
       try {
         return await fn(key)
       } catch (err) {
-        if (isAuthError(err)) continue // 换下一把
+        // 401：密钥失效/无效，换下一把 Key 重试
+        if (isAuthError(err)) continue
+        // 403：地区限制/模型权限/内容违规等非密钥原因，换 Key 无效，
+        // 透传上游真实错误信息给前端（expose:true）
+        if (err?.response?.status === 403) throw buildForbiddenError(err)
         throw err
       }
     }

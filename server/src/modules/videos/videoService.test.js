@@ -28,7 +28,13 @@ function createDeps(overrides = {}) {
       writeGeneratedBuffer: vi.fn(async (fileName) => `/files/generated/${fileName}`),
     },
     topicRepository: {
-      saveVideoConversation: vi.fn(async (data) => ({ ...data, videos: data.videos })),
+      saveVideoConversation: vi.fn(async (data) => ({
+        ...data,
+        videos: data.videos,
+        id: 'msg-assistant-1',
+      })),
+      findMessageMetaById: vi.fn(async () => null),
+      completePendingVideo: vi.fn(async (data) => ({ messageId: data.messageId, video: data.video })),
     },
     draftRepository: {
       clearReferenceImages: vi.fn(async () => {}),
@@ -249,5 +255,167 @@ describe('videoService', () => {
     await expect(
       service.generateVideoMessage('topic-1', { prompt: 'p', draft: baseDraft }),
     ).rejects.toThrow('DB down')
+  })
+
+  // ===== 轮询超时 → 保存 pending 消息 =====
+
+  it('轮询超时不丢弃任务：保存 pending 消息（含 taskId）并返回 pending 结果', async () => {
+    vi.useFakeTimers()
+    const deps = createDeps()
+    // 始终返回 running，模拟上游任务长时间不结束
+    deps.upstreamClient.getVideoTask.mockResolvedValue({ status: 'running' })
+    const service = createVideoService(deps)
+
+    const promise = service.generateVideoMessage('topic-1', { prompt: 'p', draft: baseDraft })
+    // 快进超过 30 分钟轮询上限
+    await vi.advanceTimersByTimeAsync(1800001)
+    const result = await promise
+
+    // 返回 pending 状态，不抛错
+    expect(result.status).toBe('pending')
+    expect(result.taskId).toBe('cgt-123')
+    expect(result.providerId).toBe('volcengine')
+    expect(result.pendingMessageId).toBe('msg-assistant-1')
+    // saveVideoConversation 以 pending 状态保存，videos 为空
+    expect(deps.topicRepository.saveVideoConversation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        assistantStatus: 'pending',
+        videos: [],
+        pendingMeta: expect.objectContaining({ taskId: 'cgt-123', providerId: 'volcengine' }),
+      }),
+      expect.anything(),
+    )
+    // 仍清参考图 + 重置草稿（任务已提交）
+    expect(deps.draftRepository.clearReferenceImages).toHaveBeenCalled()
+    vi.useRealTimers()
+  })
+
+  it('轮询到 expired（504）也走 pending 分支而非抛错', async () => {
+    const deps = createDeps()
+    // expired 状态会抛 504，应被 pending 分支捕获
+    deps.upstreamClient.getVideoTask.mockResolvedValue({ status: 'expired' })
+    const service = createVideoService(deps)
+
+    const result = await service.generateVideoMessage('topic-1', { prompt: 'p', draft: baseDraft })
+
+    expect(result.status).toBe('pending')
+    expect(result.taskId).toBe('cgt-123')
+  })
+
+  it('轮询到 failed（502）不走 pending 分支，正常抛错', async () => {
+    const deps = createDeps()
+    deps.upstreamClient.getVideoTask.mockResolvedValue({
+      status: 'failed',
+      error: { message: '内容不合规' },
+    })
+    const service = createVideoService(deps)
+
+    await expect(
+      service.generateVideoMessage('topic-1', { prompt: 'p', draft: baseDraft }),
+    ).rejects.toMatchObject({ status: 502, expose: true })
+    // 不应保存 pending 消息
+    expect(deps.topicRepository.saveVideoConversation).not.toHaveBeenCalled()
+  })
+
+  // ===== retryPendingVideo 回查 =====
+
+  it('retryPendingVideo：消息不存在时抛 404', async () => {
+    const deps = createDeps()
+    deps.topicRepository.findMessageMetaById.mockResolvedValue(null)
+    const service = createVideoService(deps)
+
+    await expect(service.retryPendingVideo('topic-1', 'msg-x')).rejects.toMatchObject({
+      status: 404,
+      expose: true,
+    })
+  })
+
+  it('retryPendingVideo：消息非 pending 状态时抛 400', async () => {
+    const deps = createDeps()
+    deps.topicRepository.findMessageMetaById.mockResolvedValue({
+      id: 'msg-1',
+      status: 'done',
+      type: 'assistant_videos',
+      meta: { taskId: 'cgt-123', providerId: 'volcengine' },
+    })
+    const service = createVideoService(deps)
+
+    await expect(service.retryPendingVideo('topic-1', 'msg-1')).rejects.toMatchObject({
+      status: 400,
+      expose: true,
+    })
+  })
+
+  it('retryPendingVideo：上游任务 succeeded → 下载落盘 + 补全消息 → 返回 done', async () => {
+    const deps = createDeps()
+    deps.topicRepository.findMessageMetaById.mockResolvedValue({
+      id: 'msg-1',
+      status: 'pending',
+      type: 'assistant_videos',
+      meta: { taskId: 'cgt-123', providerId: 'volcengine' },
+    })
+    deps.upstreamClient.getVideoTask.mockResolvedValue({
+      status: 'succeeded',
+      content: { video_url: 'https://volc.example.com/done.mp4' },
+      usage: { tokens: 20 },
+    })
+    axios.get.mockResolvedValue({ data: Buffer.from('video-data') })
+    const service = createVideoService(deps)
+
+    const result = await service.retryPendingVideo('topic-1', 'msg-1')
+
+    expect(result.status).toBe('done')
+    expect(result.video.url).toMatch(/^\/files\/generated\//)
+    expect(result.providerName).toBe('火山方舟')
+    // 补全消息调用 completePendingVideo
+    expect(deps.topicRepository.completePendingVideo).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messageId: 'msg-1',
+        topicId: 'topic-1',
+        metaPatch: expect.objectContaining({ usage: { tokens: 20 } }),
+      }),
+      expect.anything(),
+    )
+  })
+
+  it('retryPendingVideo：上游仍 running → 返回 pending', async () => {
+    const deps = createDeps()
+    deps.topicRepository.findMessageMetaById.mockResolvedValue({
+      id: 'msg-1',
+      status: 'pending',
+      type: 'assistant_videos',
+      meta: { taskId: 'cgt-123', providerId: 'volcengine' },
+    })
+    deps.upstreamClient.getVideoTask.mockResolvedValue({ status: 'running' })
+    const service = createVideoService(deps)
+
+    const result = await service.retryPendingVideo('topic-1', 'msg-1')
+
+    expect(result.status).toBe('pending')
+    expect(result.taskId).toBe('cgt-123')
+    // 不应下载或补全
+    expect(axios.get).not.toHaveBeenCalled()
+    expect(deps.topicRepository.completePendingVideo).not.toHaveBeenCalled()
+  })
+
+  it('retryPendingVideo：上游 failed → 抛 502（透传上游原因）', async () => {
+    const deps = createDeps()
+    deps.topicRepository.findMessageMetaById.mockResolvedValue({
+      id: 'msg-1',
+      status: 'pending',
+      type: 'assistant_videos',
+      meta: { taskId: 'cgt-123', providerId: 'volcengine' },
+    })
+    deps.upstreamClient.getVideoTask.mockResolvedValue({
+      status: 'failed',
+      error: { message: '内容不合规' },
+    })
+    const service = createVideoService(deps)
+
+    await expect(service.retryPendingVideo('topic-1', 'msg-1')).rejects.toMatchObject({
+      status: 502,
+      expose: true,
+      message: expect.stringContaining('内容不合规'),
+    })
   })
 })

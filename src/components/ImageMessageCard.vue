@@ -1,5 +1,6 @@
 <script setup>
 import { NImage, NImageGroup } from 'naive-ui'
+import { useCopyFeedback } from '@/composables/useCopyFeedback'
 
 const imageFrameStyle = {
   maxWidth: '720px',
@@ -14,6 +15,8 @@ defineProps({
     required: true,
   },
 })
+
+const { copied, copy } = useCopyFeedback()
 </script>
 
 <template>
@@ -52,6 +55,9 @@ defineProps({
         <button type="button" @click="emit('retry', message)">再次生成</button>
         <button type="button" @click="emit('reference', message)">设为参考图</button>
         <button type="button" @click="emit('download', message)">下载原图</button>
+        <button type="button" data-action="copy" @click="copy(message.prompt)">
+          {{ copied ? '已复制' : '复制' }}
+        </button>
       </div>
     </div>
   </div>

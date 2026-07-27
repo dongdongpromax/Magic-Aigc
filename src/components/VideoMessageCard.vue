@@ -1,5 +1,6 @@
 <script setup>
 import { computed } from 'vue'
+import { useCopyFeedback } from '@/composables/useCopyFeedback'
 
 const props = defineProps({
   message: {
@@ -10,7 +11,17 @@ const props = defineProps({
 
 // 视频消息不支持「设为首帧」：首帧必须是图片，而视频文件（video/mp4）无法作为
 // image_url 传给上游（Seedance 会拒绝）。如需以某帧为起点，请上传首帧参考图。
-defineEmits(['refine', 'download', 'retry'])
+defineEmits(['refine', 'download', 'retry', 'check-pending'])
+
+const { copied, copy } = useCopyFeedback()
+
+/**
+ * 是否为 pending 状态（轮询超时后任务仍在后台运行）
+ * pending 时展示占位提示 +「检查状态」按钮，而非视频播放器和下载按钮
+ */
+const isPending = computed(() => {
+  return props.message.status === 'pending' || props.message.meta?.status === 'pending'
+})
 
 /**
  * 视频列表：优先 message.videos，否则从 message.images 筛选 video/* 类型项
@@ -82,7 +93,19 @@ const refModeLabel = computed(() => {
         </template>
       </div>
 
-      <div class="video-grid">
+      <!-- pending 状态：轮询超时但任务仍在后台运行，展示占位提示 + 检查按钮 -->
+      <div v-if="isPending" class="pending-banner" data-role="pending-banner">
+        <div class="pending-icon">⏳</div>
+        <div class="pending-text">
+          <div class="pending-title">视频仍在后台生成中</div>
+          <div class="pending-desc">
+            生成超时但上游任务未中断，可点击下方「检查状态」回查结果
+          </div>
+        </div>
+      </div>
+
+      <!-- 正常状态：视频播放器 -->
+      <div v-else class="video-grid">
         <div
           v-for="video in videoList"
           :key="video.id || video.url"
@@ -99,9 +122,21 @@ const refModeLabel = computed(() => {
       </div>
 
       <div class="action-row">
-        <button type="button" @click="$emit('refine', message)">继续细化</button>
-        <button type="button" @click="$emit('retry', message)">再次生成</button>
-        <button type="button" @click="$emit('download', message)">下载视频</button>
+        <!-- pending 状态只显示「检查状态」按钮 -->
+        <template v-if="isPending">
+          <button type="button" data-action="check-pending" @click="$emit('check-pending', message)">
+            检查状态
+          </button>
+        </template>
+        <!-- 正常状态显示完整操作栏 -->
+        <template v-else>
+          <button type="button" @click="$emit('refine', message)">继续细化</button>
+          <button type="button" @click="$emit('retry', message)">再次生成</button>
+          <button type="button" @click="$emit('download', message)">下载视频</button>
+        </template>
+        <button type="button" data-action="copy" @click="copy(message.prompt)">
+          {{ copied ? '已复制' : '复制' }}
+        </button>
       </div>
     </div>
   </div>
@@ -182,6 +217,41 @@ const refModeLabel = computed(() => {
     0 0 0 1px rgba(255, 255, 255, 0.08);
 }
 
+/* pending 占位横幅：图标 + 标题 + 说明，干练业务感 */
+.pending-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 18px 20px;
+  border-radius: 12px;
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.22);
+}
+
+.pending-icon {
+  font-size: 24px;
+  line-height: 1.4;
+  flex-shrink: 0;
+}
+
+.pending-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pending-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.pending-desc {
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.52);
+  line-height: 1.5;
+}
+
 .action-row {
   display: flex;
   flex-wrap: wrap;
@@ -199,6 +269,18 @@ const refModeLabel = computed(() => {
     &:hover {
       background: rgba(255, 255, 255, 0.08);
       border-color: rgba(255, 255, 255, 0.14);
+    }
+  }
+
+  /* 「检查状态」按钮用琥珀色强调，与 pending 横幅呼应 */
+  button[data-action='check-pending'] {
+    background: rgba(245, 158, 11, 0.14);
+    border-color: rgba(245, 158, 11, 0.32);
+    color: rgba(255, 200, 80, 0.95);
+
+    &:hover {
+      background: rgba(245, 158, 11, 0.22);
+      border-color: rgba(245, 158, 11, 0.44);
     }
   }
 }

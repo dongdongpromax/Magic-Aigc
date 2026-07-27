@@ -31,6 +31,29 @@ function parseMeta(meta) {
 }
 
 /**
+ * 把草稿参考图序列化为可写入用户消息 meta_json 的精简数组
+ *
+ * 用户消息需持久化「本次发送附带了哪些参考图」，供前端在气泡中展示，
+ * 避免 reload 后（draft_reference_images 已被 clearReferenceImages 清空）
+ * 用户消息丢失参考图痕迹、让人误以为参考图没发出。
+ *
+ * 仅保留展示所需三字段：url（/files/... 路径，前端 <img> 直接加载）、
+ * mimeType、name。过滤掉无 url 的项（无法展示）。
+ * @param {Array<{ filePath?: string; url?: string; mimeType?: string; type?: string; name?: string; fileName?: string }>|undefined} referenceImages
+ * @returns {Array<{ url: string; mimeType: string; name: string }>}
+ */
+function buildReferenceMeta(referenceImages) {
+  if (!Array.isArray(referenceImages)) return []
+  return referenceImages
+    .map((r) => ({
+      url: r.filePath || r.url || '',
+      mimeType: r.mimeType || r.type || 'image/png',
+      name: r.name || r.fileName || '',
+    }))
+    .filter((r) => r.url)
+}
+
+/**
  * 创建主题仓储
  * @param {import('mysql2/promise').Pool} pool 数据库连接池
  */
@@ -201,6 +224,8 @@ export function createTopicRepository(pool) {
           null,
           JSON.stringify({
             referenceCount: draft.referenceImages?.length || 0,
+            // 持久化参考图元数据，供前端用户消息气泡展示「本次发送的参考图」
+            referenceImages: buildReferenceMeta(draft.referenceImages),
             providerName: draft.providerName || '',
           }),
           now,
@@ -291,7 +316,10 @@ export function createTopicRepository(pool) {
      * @param {import('mysql2/promise').Pool|import('mysql2/promise').PoolConnection} executor 可选执行器
      * @returns {Promise<object>} 创建的 assistant 消息对象
      */
-    async saveVideoConversation({ topicId, prompt, draft, videos, usage }, executor = pool) {
+    async saveVideoConversation(
+      { topicId, prompt, draft, videos, usage, assistantStatus = 'done', pendingMeta = null },
+      executor = pool,
+    ) {
       const now = Date.now()
       const userMessageId = createId()
       const assistantMessageId = createId()
@@ -318,9 +346,13 @@ export function createTopicRepository(pool) {
           null,
           JSON.stringify({
             referenceCount: draft.referenceImages?.length || 0,
+            // 持久化参考图元数据，供前端用户消息气泡展示「本次发送的参考图」
+            referenceImages: buildReferenceMeta(draft.referenceImages),
             providerName: draft.providerName || '',
             ratio: draft.ratio || '',
             duration: draft.duration ?? null,
+            // 视频参考模式透传落库，供用户消息气泡派生首帧/尾帧角色标签（reload 后仍可用）
+            videoRefMode: draft.videoRefMode || 'first_frame',
           }),
           now,
         ],
@@ -342,14 +374,18 @@ export function createTopicRepository(pool) {
           null,
           null,
           null,
-          'done',
+          assistantStatus,
           draft.referenceImages?.[0]?.sourceMessageId || userMessageId,
           JSON.stringify({
             videoCount: safeVideos.length,
             providerName: draft.providerName || '',
             ratio: draft.ratio || '',
             duration: draft.duration ?? null,
+            resolution: draft.resolution || '',
+            videoRefMode: draft.videoRefMode || 'first_frame',
             usage: usage || null,
+            // pending 状态额外透传 taskId/providerId，供 retry-video 端点回查上游任务
+            ...(pendingMeta || {}),
           }),
           now + 1,
         ],
@@ -388,6 +424,7 @@ export function createTopicRepository(pool) {
         topicId,
         type: 'assistant_videos',
         role: 'assistant',
+        status: assistantStatus,
         prompt,
         videos: safeVideos,
         // images 字段兼容：listMessages 把 message_images 行读入 images，前端按 type 路由
@@ -395,9 +432,86 @@ export function createTopicRepository(pool) {
         model: draft.model || '',
         ratio: draft.ratio || '',
         duration: draft.duration ?? null,
+        resolution: draft.resolution || '',
+        videoRefMode: draft.videoRefMode || 'first_frame',
+        // pending 透传 taskId/providerId，供前端构建 retry 请求
+        taskId: pendingMeta?.taskId || null,
+        providerId: pendingMeta?.providerId || null,
         sourceMessageId: draft.referenceImages?.[0]?.sourceMessageId || userMessageId,
         createdAt: now + 1,
       }
+    },
+
+    /**
+     * 按 ID 读取单条消息的 meta_json + status + type
+     *
+     * 供 videoService.retryPendingVideo 读取 pending 消息的 taskId/providerId，
+     * 以便回查上游任务状态。
+     * @param {string} messageId 消息 ID
+     * @param {import('mysql2/promise').Pool|import('mysql2/promise').PoolConnection} executor
+     * @returns {Promise<{ id: string; status: string; type: string; meta: object|null }|null>}
+     */
+    async findMessageMetaById(messageId, executor = pool) {
+      const [rows] = await executor.query(
+        'SELECT id, status, type, meta_json FROM messages WHERE id = ? LIMIT 1',
+        [messageId],
+      )
+      if (!rows.length) return null
+      const row = rows[0]
+      return {
+        id: row.id,
+        status: row.status,
+        type: row.type,
+        meta: parseMeta(row.meta_json),
+      }
+    },
+
+    /**
+     * 补全 pending 视频消息：插入视频文件 + 更新消息状态为 done + 更新主题封面
+     *
+     * 当轮询超时保存了 pending 消息后，用户点「检查状态」时上游任务已完成，
+     * 调本方法把视频落盘并更新消息状态。
+     *
+     * @param {{ messageId: string; topicId: string; video: object; metaPatch?: object }} payload
+     * @param {import('mysql2/promise').Pool|import('mysql2/promise').PoolConnection} executor
+     * @returns {Promise<{ messageId: string; video: object }>}
+     */
+    async completePendingVideo({ messageId, topicId, video, metaPatch = null }, executor = pool) {
+      const now = Date.now()
+      const safeVideo = video || {}
+
+      // 插入视频文件到 message_images（关联到已存在的 pending 消息）
+      await executor.query(
+        `INSERT INTO message_images
+          (id, message_id, file_path, file_name, mime_type, width, height, saved_to_project, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          createId(),
+          messageId,
+          safeVideo.localPath || safeVideo.url,
+          safeVideo.fileName || 'generated.mp4',
+          safeVideo.mimeType || 'video/mp4',
+          null,
+          null,
+          safeVideo.savedToProject ? 1 : 0,
+          now,
+        ],
+      )
+
+      // 更新消息状态为 done，合并 metaPatch（含 usage 等）
+      const patchMeta = metaPatch || {}
+      await executor.query(
+        `UPDATE messages SET status = 'done', meta_json = JSON_MERGE_PATCH(meta_json, ?) WHERE id = ?`,
+        [JSON.stringify({ status: 'done', videoCount: 1, ...patchMeta }), messageId],
+      )
+
+      // 更新主题封面为首个视频 url
+      await executor.query(
+        'UPDATE topics SET cover_image_path = ?, status = ?, updated_at = ? WHERE id = ?',
+        [safeVideo.url || null, 'idle', now + 1, topicId],
+      )
+
+      return { messageId, video: safeVideo }
     },
 
     /**

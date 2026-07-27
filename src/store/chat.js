@@ -14,6 +14,9 @@ import {
   deleteReferenceImage as deleteRemoteReferenceImage,
   registerReferenceFromMessage,
 } from '@/services/uploadApi'
+import { requestImages } from '@/services/imageSession'
+import { requestVideo, checkPendingVideo } from '@/services/videoSession'
+import { updateBackendConfig } from '@/services/backendClient'
 import { buildImageFileName, buildTimestamp, triggerBrowserDownload } from '@/utils/download'
 import { MAX_REFERENCE_IMAGES } from '@/utils/constants'
 import { createStatusMessage, createUserPromptMessage } from '@/utils/message'
@@ -185,6 +188,8 @@ export const useChatStore = defineStore('chat', () => {
     try {
       const [settings] = await Promise.all([getSettings(), providersStore.loadProviders()])
       Object.assign(appConfig, defaults, settings)
+      // 同步后端连接参数到 axios 实例：用户在设置中改的 baseURL/timeout 对后续请求生效
+      updateBackendConfig(appConfig)
       topics.value = await listTopics()
 
       if (topics.value.length) {
@@ -499,6 +504,8 @@ export const useChatStore = defineStore('chat', () => {
         defaultVideoRefMode: appConfig.defaultVideoRefMode,
       })
       Object.assign(appConfig, saved)
+      // 保存后同步 axios 实例的 baseURL/timeout，确保新值立即对后续请求生效
+      updateBackendConfig(appConfig)
       settingsSaveStatus.value = 'saved'
       lastError.value = ''
       return true
@@ -519,6 +526,15 @@ export const useChatStore = defineStore('chat', () => {
   function toggleChatFullscreen() {
     isChatFullscreen.value = !isChatFullscreen.value
   }
+
+  /**
+   * 生成中状态（图像/视频生成统一标记）
+   *
+   * 替代 InputConsole 本地的 isLoading，提升到 store 后：
+   * - InputConsole 发送与 ChatArea 重试共用同一把锁，防止并发生成
+   * - 发送按钮 disabled 状态、重试按钮 disabled 状态都读它
+   */
+  const isGenerating = ref(false)
 
   /**
    * 图像生成完成后的处理：下载图片、追加 assistant 消息、更新主题
@@ -666,6 +682,51 @@ export const useChatStore = defineStore('chat', () => {
       messages.value.splice(latestGeneratingIndex, 1)
     }
 
+    // pending 分支：轮询超时但上游任务仍在后台运行
+    // 保存 pending 消息（含 taskId/providerId），用户可点「检查状态」回查
+    if (result.status === 'pending') {
+      messages.value.push({
+        id: result.pendingMessageId || createId(),
+        topicId,
+        type: 'assistant_videos',
+        role: 'assistant',
+        status: 'pending',
+        prompt,
+        videos: [],
+        images: [],
+        model: draft.model,
+        ratio: result.ratio || draft.ratio,
+        duration: result.duration ?? draft.duration,
+        resolution: result.resolution || draft.resolution,
+        videoRefMode: result.videoRefMode || draft.videoRefMode || 'first_frame',
+        taskId: result.taskId || null,
+        providerId: result.providerId || null,
+        meta: {
+          providerName: result.providerName || '',
+          ratio: result.ratio || draft.ratio,
+          duration: result.duration ?? draft.duration,
+          resolution: result.resolution || draft.resolution,
+          videoRefMode: result.videoRefMode || draft.videoRefMode || 'first_frame',
+          status: 'pending',
+          taskId: result.taskId || null,
+        },
+        createdAt: Date.now(),
+      })
+
+      if (topic) {
+        topic.lastPrompt = prompt
+        topic.updatedAt = Date.now()
+        topic.status = 'idle'
+      }
+
+      // 后端已清参考图 + 重置草稿，前端同步
+      draft.prompt = ''
+      draft.referenceImages = []
+      lastError.value = ''
+      scheduleDraftPersist(topicId)
+      return
+    }
+
     const videos = (result.videos || []).map((video) => ({
       ...video,
       localPath: video.localPath || '',
@@ -750,6 +811,149 @@ export const useChatStore = defineStore('chat', () => {
     }
 
     lastError.value = readableError
+  }
+
+  /**
+   * 检查 pending 视频任务状态：调后端 retry-video 端点回查上游任务
+   *
+   * 三种结果：
+   * - done：上游任务已成功，后端已下载落盘 + 补全消息 → 前端更新消息为已完成
+   * - pending：仍在生成中 → 提示用户稍后再试
+   * - error：上游失败 → 透传错误信息
+   *
+   * @param {{ id: string; topicId: string; status?: string }} message pending 消息对象
+   */
+  async function checkPendingVideoMessage(message) {
+    const topicId = message.topicId
+    const messageId = message.id
+    if (!topicId || !messageId) return
+
+    try {
+      const result = await checkPendingVideo(topicId, messageId)
+
+      if (result.status === 'done') {
+        // 上游已完成：更新 pending 消息为已完成状态，填充视频数据
+        const idx = messages.value.findIndex((m) => m.id === messageId)
+        if (idx >= 0) {
+          const video = {
+            ...result.video,
+            localPath: result.video?.localPath || '',
+            savedToProject: Boolean(result.video?.localPath),
+          }
+          messages.value[idx] = {
+            ...messages.value[idx],
+            status: 'done',
+            videos: [video],
+            images: [video],
+            meta: {
+              ...messages.value[idx].meta,
+              status: 'done',
+            },
+          }
+        }
+
+        // 更新主题封面为首个视频 url
+        const topic = getTopicById(topicId)
+        if (topic && result.video?.url) {
+          topic.coverImage = result.video.url
+        }
+
+        lastError.value = ''
+      } else {
+        // 仍在生成中
+        lastError.value = result.message || '视频仍在生成中，请稍后再试'
+      }
+    } catch (error) {
+      lastError.value = getReadableError(error, '检查视频状态失败')
+    }
+  }
+
+  /**
+   * 判断草稿快照对应的模型是否为视频模型
+   *
+   * 从 providersStore 查 providerId + modelId 的 isVideo 标记，
+   * 与 InputConsole 的 selectedModelInfo 逻辑一致。
+   * 模型未找到（已禁用/删除）时回退为图像模型，避免误走视频分支。
+   * @param {{ providerId?: string; model?: string }} draftSnapshot
+   * @returns {boolean}
+   */
+  function isDraftVideoModel(draftSnapshot) {
+    const pid = draftSnapshot?.providerId
+    const mid = draftSnapshot?.model
+    if (!pid || !mid) return false
+    const provider = providersStore.enabledProviders.find((p) => p.id === pid)
+    if (!provider?.enabledModels) return false
+    const model = provider.enabledModels.find((m) => m.modelId === mid)
+    return Boolean(model?.isVideo)
+  }
+
+  /**
+   * 从草稿快照还原当前主题草稿的生成参数
+   *
+   * 用于「重试」：把历史用户消息的 draftSnapshot 还原到当前草稿，
+   * 让输入框显示被重试的 prompt 与参数，随后由 runGeneration 直接发起生成。
+   *
+   * 还原字段：prompt + model + providerId + 图像参数(size/quality/n) +
+   * 视频参数(ratio/duration/resolution/videoRefMode) + referenceImages。
+   * 参考图深拷贝避免引用共享导致后续修改污染快照。
+   * @param {{ prompt?: string; model?: string; providerId?: string; size?: string; quality?: string; n?: number; ratio?: string; duration?: number; resolution?: string; videoRefMode?: string; referenceImages?: Array<object> }} snapshot
+   */
+  function restoreDraft(snapshot) {
+    if (!snapshot) return
+    const draft = currentDraft.value
+    draft.prompt = snapshot.prompt || ''
+    draft.model = snapshot.model || draft.model
+    draft.providerId = snapshot.providerId || draft.providerId
+    draft.size = snapshot.size || draft.size
+    draft.quality = snapshot.quality || draft.quality
+    draft.n = snapshot.n || draft.n
+    draft.ratio = snapshot.ratio || draft.ratio
+    draft.duration = snapshot.duration ?? draft.duration
+    draft.resolution = snapshot.resolution || draft.resolution
+    draft.videoRefMode = snapshot.videoRefMode || draft.videoRefMode
+    draft.referenceImages = (snapshot.referenceImages || []).map((img) => ({ ...img }))
+    scheduleDraftPersist(currentTopicId.value)
+  }
+
+  /**
+   * 生成流程编排（图像/视频统一入口）
+   *
+   * 从 InputConsole.handleSend 抽取，让发送与「重试」共用同一套生成流程：
+   * addUserPrompt（建用户消息+状态消息）→ requestImages/requestVideo（调后端）
+   * → complete/fail（写结果消息+清理草稿）。
+   *
+   * 调用方需在 await 之前捕获 draftSnapshot 传入，避免 await 期间切换主题
+   * 导致参数错位（与原 handleSend 的竞态修复保持一致）。
+   *
+   * @param {string} prompt 用户 prompt（已 trim）
+   * @param {object} draftSnapshot 发起时的草稿快照（含 model/providerId/参数/参考图）
+   * @returns {Promise<void>}
+   */
+  async function runGeneration(prompt, draftSnapshot) {
+    if (isGenerating.value) return
+    // 在任何 await 之前确定视频/图像分支，避免快照与分支错位
+    const wasVideoModel = isDraftVideoModel(draftSnapshot)
+    isGenerating.value = true
+    let originTopicId = ''
+
+    try {
+      originTopicId = await addUserPrompt(prompt)
+      if (wasVideoModel) {
+        const result = await requestVideo(originTopicId, { prompt, draft: draftSnapshot })
+        await completeVideoGeneration(result, prompt, originTopicId)
+      } else {
+        const result = await requestImages(originTopicId, { prompt, draft: draftSnapshot })
+        await completeImageGeneration(result, prompt, originTopicId)
+      }
+    } catch (error) {
+      if (wasVideoModel) {
+        failVideoGeneration(error, originTopicId)
+      } else {
+        failImageGeneration(error, originTopicId)
+      }
+    } finally {
+      isGenerating.value = false
+    }
   }
 
   function openSettings() {
@@ -838,6 +1042,10 @@ export const useChatStore = defineStore('chat', () => {
     failImageGeneration,
     completeVideoGeneration,
     failVideoGeneration,
+    checkPendingVideoMessage,
+    isGenerating,
+    restoreDraft,
+    runGeneration,
     saveSettings,
     toggleChatFullscreen,
     openSettings,

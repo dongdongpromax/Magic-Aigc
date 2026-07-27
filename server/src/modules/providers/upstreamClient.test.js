@@ -84,7 +84,35 @@ describe('upstreamClient', () => {
     expect(axios.post).toHaveBeenCalledTimes(2)
   })
 
-  it('非 401/403 错误（如 500）直接抛出，不换 Key', async () => {
+  it('403 不换 Key，直接透传上游真实错误（expose:true + 上游 message）', async () => {
+    // 403 通常是地区限制/模型权限/内容违规，换 Key 无效，应直接暴露真实原因
+    const forbidden = httpError(403, { error: { message: 'Country/region not supported' } })
+    axios.post.mockRejectedValue(forbidden)
+    const client = createUpstreamClient()
+
+    await expect(client.generateImages(provider, { model: 'm' }, 1000)).rejects.toMatchObject({
+      status: 403,
+      expose: true,
+      message: 'Country/region not supported',
+    })
+    // 关键：403 不触发密钥轮询，只请求一次
+    expect(axios.post).toHaveBeenCalledTimes(1)
+  })
+
+  it('403 顶层 message 也能被提取透传', async () => {
+    const forbidden = httpError(403, { message: '该模型当前地区不可用' })
+    axios.post.mockRejectedValue(forbidden)
+    const client = createUpstreamClient()
+
+    await expect(client.generateImages(provider, { model: 'm' }, 1000)).rejects.toMatchObject({
+      status: 403,
+      expose: true,
+      message: '该模型当前地区不可用',
+    })
+    expect(axios.post).toHaveBeenCalledTimes(1)
+  })
+
+  it('非 401 错误（如 500）直接抛出，不换 Key', async () => {
     axios.post.mockRejectedValue(httpError(500))
     const client = createUpstreamClient()
 

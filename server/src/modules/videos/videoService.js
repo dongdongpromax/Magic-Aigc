@@ -18,8 +18,8 @@ import { sanitizeForLog } from '../logs/logSanitizer.js'
 
 /** 轮询间隔（毫秒） */
 const POLL_INTERVAL_MS = 5000
-/** 轮询总超时（毫秒，5 分钟，覆盖 30-120 秒生成 + 排队） */
-const MAX_TOTAL_WAIT_MS = 300000
+/** 轮询总超时（毫秒，30 分钟，覆盖排队 + 高分辨率/长时长视频生成） */
+const MAX_TOTAL_WAIT_MS = 1800000
 /** 视频下载超时（毫秒，2 分钟） */
 const DOWNLOAD_TIMEOUT_MS = 120000
 
@@ -118,7 +118,7 @@ export function createVideoService(deps) {
       // queued/running 继续等待
       await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS))
     }
-    const err = new Error('视频生成超时（等待超过 5 分钟）')
+    const err = new Error('视频生成超时（等待超过 30 分钟）')
     err.status = 504
     err.expose = true
     throw err
@@ -205,9 +205,81 @@ export function createVideoService(deps) {
           throw err
         }
 
-        // 5. 轮询直到终态（succeeded 才继续；失败/超时直接抛）
-        const finalTask = await pollUntilTerminal(provider, taskId)
-        finalTaskResponse = finalTask
+        // 5. 轮询直到终态（succeeded 才继续；失败直接抛；超时保存 pending 消息）
+        let finalTask = null
+        let isPending = false
+        try {
+          finalTask = await pollUntilTerminal(provider, taskId)
+          finalTaskResponse = finalTask
+        } catch (pollErr) {
+          if (pollErr.status === 504) {
+            // 轮询超时：上游任务仍在后台运行，不丢弃——保存 pending 消息（含 taskId）
+            // 用户可稍后点「检查状态」让 retryPendingVideo 回查上游任务并下载结果
+            isPending = true
+          } else {
+            // 502（内容不合规/失败）等错误正常抛出
+            throw pollErr
+          }
+        }
+
+        // 5b. 超时分支：保存 pending 消息，返回 pending 结果（不抛错）
+        if (isPending) {
+          const message = await runTransaction(pool, async (conn) => {
+            const saved = await topicRepository.saveVideoConversation(
+              {
+                topicId,
+                prompt,
+                draft: {
+                  ...draft,
+                  providerName: provider.name,
+                  ratio: videoPayload.ratio,
+                  duration: videoPayload.duration,
+                  resolution: videoPayload.resolution,
+                  videoRefMode: draft.videoRefMode || 'first_frame',
+                },
+                videos: [],
+                assistantStatus: 'pending',
+                pendingMeta: {
+                  taskId,
+                  providerId: provider.id,
+                  status: 'pending',
+                },
+              },
+              conn,
+            )
+            await draftRepository.clearReferenceImages(topicId, conn)
+            await draftRepository.saveDraft(topicId, { ...draft, prompt: '' }, conn)
+            return saved
+          })
+
+          const pendingResult = {
+            status: 'pending',
+            taskId,
+            providerId: provider.id,
+            pendingMessageId: message.id,
+            providerName: provider.name,
+            ratio: videoPayload.ratio,
+            duration: videoPayload.duration,
+            resolution: videoPayload.resolution,
+            videoRefMode: draft.videoRefMode || 'first_frame',
+            message: '视频生成超时，任务仍在后台运行，可稍后点击「检查状态」',
+          }
+
+          // 记录使用日志（pending）：标记为 pending 状态，便于后续排查
+          if (usageLogger) {
+            logEntry.status = 'pending'
+            logEntry.providerName = provider.name
+            logEntry.model = videoPayload.model
+            logEntry.clientRequest = sanitizeForLog({ topicId, payload })
+            logEntry.upstreamRequest = sanitizeForLog(videoPayload)
+            logEntry.upstreamResponse = sanitizeForLog({ createTaskResponse })
+            logEntry.clientResponse = sanitizeForLog(pendingResult)
+            logEntry.durationMs = Date.now() - logStartTime
+            await usageLogger.log(logEntry)
+          }
+
+          return pendingResult
+        }
 
         // 6. 下载视频到本地（video_url 预签名 24h 有效，必须落盘）
         const videoUrl = finalTask.content?.video_url
@@ -306,6 +378,106 @@ export function createVideoService(deps) {
           await usageLogger.log(logEntry)
         }
         throw err
+      }
+    },
+
+    /**
+     * 回查 pending 视频任务：读取消息 meta 中的 taskId → 查上游状态 → 成功则下载落盘并补全消息
+     *
+     * 使用场景：generateVideoMessage 轮询超时后保存了 pending 消息，用户点「检查状态」
+     * 时调用本方法。上游任务可能已成功（下载视频）、仍在运行（返回 pending）、或已失败（抛错）。
+     *
+     * @param {string} topicId 主题 ID
+     * @param {string} messageId pending 消息 ID
+     * @returns {Promise<{ status: 'done'|'pending'; video?: object; providerName?: string; message?: string }>}
+     */
+    async retryPendingVideo(topicId, messageId) {
+      // 1. 读取 pending 消息的 meta（含 taskId/providerId）
+      const messageMeta = await topicRepository.findMessageMetaById(messageId)
+      if (!messageMeta) {
+        const err = new Error('消息不存在')
+        err.status = 404
+        err.expose = true
+        throw err
+      }
+      if (messageMeta.status !== 'pending') {
+        const err = new Error('该消息不在 pending 状态，无需检查')
+        err.status = 400
+        err.expose = true
+        throw err
+      }
+
+      const taskId = messageMeta.meta?.taskId
+      const providerId = messageMeta.meta?.providerId
+      if (!taskId || !providerId) {
+        const err = new Error('pending 消息缺少 taskId/providerId，无法回查')
+        err.status = 400
+        err.expose = true
+        throw err
+      }
+
+      // 2. 解析中转站（用 pending meta 中的 providerId）
+      const provider = await providersService.resolveForDraft(providerId)
+
+      // 3. 查询上游任务状态
+      const task = await upstreamClient.getVideoTask(provider, taskId)
+
+      // 4. 成功：下载视频 + 事务内补全 pending 消息
+      if (task.status === 'succeeded') {
+        const videoUrl = task.content?.video_url
+        if (!videoUrl) {
+          const err = new Error('任务成功但未返回视频地址')
+          err.status = 502
+          err.expose = true
+          throw err
+        }
+        const video = await downloadVideoToLocal(videoUrl, topicId)
+
+        const writtenPaths = [video.localPath]
+        try {
+          await runTransaction(pool, async (conn) => {
+            await topicRepository.completePendingVideo(
+              {
+                messageId,
+                topicId,
+                video,
+                metaPatch: { usage: task.usage || null, status: 'done' },
+              },
+              conn,
+            )
+          })
+
+          return {
+            status: 'done',
+            video,
+            providerName: provider.name,
+          }
+        } catch (err) {
+          // DB 失败但文件已落盘 → best-effort 清理
+          await cleanupOrphanFiles(writtenPaths, storageRoot)
+          throw err
+        }
+      }
+
+      // 5. 失败/取消：抛错（上游原因对用户可读）
+      if (task.status === 'failed' || task.status === 'cancelled') {
+        const err = new Error(`视频生成失败：${task.error?.message || task.status}`)
+        err.status = 502
+        err.expose = true
+        throw err
+      }
+      if (task.status === 'expired') {
+        const err = new Error('视频生成任务已过期（上游 expired）')
+        err.status = 504
+        err.expose = true
+        throw err
+      }
+
+      // 6. queued/running：仍在生成中，返回 pending
+      return {
+        status: 'pending',
+        taskId,
+        message: '视频仍在生成中，请稍后再试',
       }
     },
   }

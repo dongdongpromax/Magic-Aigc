@@ -28,6 +28,7 @@ export function getDefaultAppConfig() {
     defaultDuration: DEFAULT_VIDEO_DURATION,
     defaultResolution: DEFAULT_VIDEO_RESOLUTION,
     defaultVideoRefMode: DEFAULT_VIDEO_REF_MODE,
-    timeout: Number(env.VITE_BACKEND_TIMEOUT || 1200000),
+    // AI 接口调用超时：30 分钟（1800000ms），覆盖慢速图像/视频生成
+    timeout: Number(env.VITE_BACKEND_TIMEOUT || 1800000),
   }
 }

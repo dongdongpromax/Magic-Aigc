@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import { useChatStore } from './chat'
+import { useProvidersStore } from './providers'
+import { requestImages } from '@/services/imageSession'
+import { requestVideo } from '@/services/videoSession'
 
 const {
   listTopicsMock,
@@ -20,6 +23,14 @@ const {
   deleteTopicMock: vi.fn(),
   getSettingsMock: vi.fn(),
   updateSettingsMock: vi.fn(),
+}))
+
+// runGeneration 内部调用 imageSession/videoSession，mock 掉避免真实网络
+vi.mock('@/services/imageSession', () => ({
+  requestImages: vi.fn(),
+}))
+vi.mock('@/services/videoSession', () => ({
+  requestVideo: vi.fn(),
 }))
 
 vi.mock('@/services/chatApi', () => ({
@@ -439,5 +450,198 @@ describe('chat store', () => {
       'topic-1',
       expect.objectContaining({ videoRefMode: 'reference' }),
     )
+  })
+
+  describe('runGeneration', () => {
+    /**
+     * 注入一家含图像模型的中转站到 providersStore，供 isDraftVideoModel 判定为图像分支。
+     * providersStore.providers 直接赋值即可触发 enabledProviders computed 重算。
+     */
+    function seedImageProvider() {
+      const providersStore = useProvidersStore()
+      providersStore.providers = [
+        {
+          id: 'openrouter',
+          name: 'OpenRouter',
+          enabled: true,
+          apiKeys: ['sk-a'],
+          enabledModels: [{ modelId: 'openai/gpt-image-2', displayName: 'GPT Image 2' }],
+        },
+      ]
+    }
+
+    /** 同上，但注入视频模型（isVideo: true），供 isDraftVideoModel 判定为视频分支 */
+    function seedVideoProvider() {
+      const providersStore = useProvidersStore()
+      providersStore.providers = [
+        {
+          id: 'volcengine',
+          name: '火山方舟',
+          enabled: true,
+          apiKeys: ['sk-v'],
+          enabledModels: [{ modelId: 'seedance-1-0', displayName: 'Seedance 1.0', isVideo: true }],
+        },
+      ]
+    }
+
+    it('图像快照走 requestImages 分支并透传快照给后端', async () => {
+      seedImageProvider()
+      const store = useChatStore()
+      await store.createTopic('海报概念')
+
+      requestImages.mockResolvedValue({
+        images: [{ url: 'data:image/png;base64,x' }],
+        revisedPrompt: '',
+      })
+      requestVideo.mockResolvedValue({ videos: [] })
+
+      const snapshot = {
+        prompt: '画一只猫',
+        model: 'openai/gpt-image-2',
+        providerId: 'openrouter',
+        size: '1536x864',
+        quality: 'high',
+        n: 2,
+        referenceImages: [],
+        ratio: '16:9',
+        duration: 5,
+        resolution: '720p',
+        videoRefMode: 'first_frame',
+      }
+      await store.runGeneration('画一只猫', snapshot)
+
+      // 走图像分支：requestImages 被调、requestVideo 未被调，且透传了发起时的快照
+      expect(requestImages).toHaveBeenCalledWith(
+        'topic-1',
+        expect.objectContaining({
+          prompt: '画一只猫',
+          draft: expect.objectContaining({
+            model: 'openai/gpt-image-2',
+            providerId: 'openrouter',
+            size: '1536x864',
+            n: 2,
+          }),
+        }),
+      )
+      expect(requestVideo).not.toHaveBeenCalled()
+      // 生成完成后互斥锁复位
+      expect(store.isGenerating).toBe(false)
+    })
+
+    it('视频快照走 requestVideo 分支并透传快照给后端', async () => {
+      seedVideoProvider()
+      const store = useChatStore()
+      await store.createTopic('视频概念')
+
+      requestImages.mockResolvedValue({ images: [] })
+      requestVideo.mockResolvedValue({
+        videos: [{ url: '/files/v.mp4', localPath: '/files/v.mp4' }],
+        providerName: '火山方舟',
+        ratio: '16:9',
+        duration: 5,
+      })
+
+      const snapshot = {
+        prompt: '一只猫奔跑',
+        model: 'seedance-1-0',
+        providerId: 'volcengine',
+        size: 'auto',
+        quality: 'high',
+        n: 1,
+        referenceImages: [],
+        ratio: '16:9',
+        duration: 5,
+        resolution: '720p',
+        videoRefMode: 'first_frame',
+      }
+      await store.runGeneration('一只猫奔跑', snapshot)
+
+      // 走视频分支：requestVideo 被调、requestImages 未被调
+      expect(requestVideo).toHaveBeenCalledWith(
+        'topic-1',
+        expect.objectContaining({
+          prompt: '一只猫奔跑',
+          draft: expect.objectContaining({
+            model: 'seedance-1-0',
+            providerId: 'volcengine',
+            videoRefMode: 'first_frame',
+          }),
+        }),
+      )
+      expect(requestImages).not.toHaveBeenCalled()
+      expect(store.isGenerating).toBe(false)
+    })
+
+    it('透传发起时的快照，不读 currentDraft（防 await 期间参数错位）', async () => {
+      seedImageProvider()
+      const store = useChatStore()
+      await store.createTopic('海报概念')
+
+      // 发起快照是 gpt-image-2；发起后把 currentDraft 改成别的模型，
+      // 验证 runGeneration 始终用传入的快照（参数）而非 currentDraft
+      const snapshot = {
+        prompt: '画一只猫',
+        model: 'openai/gpt-image-2',
+        providerId: 'openrouter',
+        size: '1536x864',
+        quality: 'high',
+        n: 1,
+        referenceImages: [],
+        ratio: '16:9',
+        duration: 5,
+        resolution: '720p',
+        videoRefMode: 'first_frame',
+      }
+      store.currentDraft.model = 'flux/dev'
+
+      requestImages.mockResolvedValue({ images: [], revisedPrompt: '' })
+      await store.runGeneration('画一只猫', snapshot)
+
+      // requestImages 收到的是快照里的 gpt-image-2，而非被改后的 flux/dev
+      expect(requestImages).toHaveBeenCalledWith(
+        'topic-1',
+        expect.objectContaining({
+          draft: expect.objectContaining({ model: 'openai/gpt-image-2', providerId: 'openrouter' }),
+        }),
+      )
+    })
+
+    it('生成中再次调用被互斥锁忽略（isGenerating）', async () => {
+      seedImageProvider()
+      const store = useChatStore()
+      await store.createTopic('海报概念')
+
+      // 第一次 requestImages 不立即 resolve，让 isGenerating 保持 true
+      let resolveFirst
+      requestImages.mockImplementation(
+        () => new Promise((resolve) => { resolveFirst = resolve }),
+      )
+
+      const snapshot = {
+        prompt: '第一只猫',
+        model: 'openai/gpt-image-2',
+        providerId: 'openrouter',
+        size: 'auto',
+        quality: 'high',
+        n: 1,
+        referenceImages: [],
+        ratio: '16:9',
+        duration: 5,
+        resolution: '720p',
+        videoRefMode: 'first_frame',
+      }
+      const firstCall = store.runGeneration('第一只猫', snapshot)
+      // 让第一次进入 isGenerating=true 后再发起第二次
+      await Promise.resolve()
+
+      // 第二次应被互斥锁挡掉，不产生新的 requestImages 调用
+      await store.runGeneration('第二只猫', snapshot)
+      expect(requestImages).toHaveBeenCalledTimes(1)
+
+      // 放行第一次，确认锁能正常复位
+      resolveFirst({ images: [], revisedPrompt: '' })
+      await firstCall
+      expect(store.isGenerating).toBe(false)
+    })
   })
 })
