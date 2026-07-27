@@ -16,6 +16,7 @@ import {
 } from './db/seedProviders.js'
 import { createProvidersRepository } from './db/repositories/providersRepository.js'
 import { createUsageLogRepository } from './db/repositories/usageLogRepository.js'
+import { createPromptRepository } from './db/repositories/promptRepository.js'
 import { runTransaction } from './db/transaction.js'
 import { createFileStorage } from './modules/images/fileStorage.js'
 import { createUpstreamClient } from './modules/providers/upstreamClient.js'
@@ -23,7 +24,11 @@ import { createProvidersService } from './modules/providers/providersService.js'
 import { buildImagePayload } from './modules/providers/imagePayload.js'
 import { createVideoService } from './modules/videos/videoService.js'
 import { createUsageLogger } from './modules/logs/usageLogger.js'
-import { sanitizeForLog, replaceReferenceDataUrls, replaceB64WithLocalPath } from './modules/logs/logSanitizer.js'
+import {
+  sanitizeForLog,
+  replaceReferenceDataUrls,
+  replaceB64WithLocalPath,
+} from './modules/logs/logSanitizer.js'
 
 const env = getServerEnv()
 const pool = createPool(env)
@@ -120,6 +125,7 @@ const topicRepository = createTopicRepository(pool)
 const draftRepository = createDraftRepository(pool)
 const providersRepository = createProvidersRepository(pool)
 const usageLogRepository = createUsageLogRepository(pool)
+const promptRepository = createPromptRepository(pool)
 const usageLogger = createUsageLogger({ usageLogRepository })
 const upstreamClient = createUpstreamClient()
 const providersService = createProvidersService({
@@ -148,6 +154,9 @@ const app = createApp({
   providersService,
   videoService,
   usageLogRepository,
+  promptRepository,
+  // 提示词库素材上传/删除需要 fileStorage 落盘到 storage/prompts 目录
+  fileStorage,
   // P1-6: 健康检查注入，/api/health 会调用此函数探测 DB
   healthCheck: async () => verifyDatabaseConnection(pool),
   imageService: {
@@ -257,7 +266,11 @@ const app = createApp({
         })
 
         // API 调用失败时还没写文件，无需清理
-        response = await upstreamClient.generateImages(provider, openrouterPayload, settings.timeout)
+        response = await upstreamClient.generateImages(
+          provider,
+          openrouterPayload,
+          settings.timeout,
+        )
 
         // 文件先写盘（b64 太大不便在事务里持连接），记录所有成功写入的路径
         const writtenPaths = []
@@ -318,8 +331,12 @@ const app = createApp({
           logEntry.status = 'success'
           logEntry.providerName = provider.name
           logEntry.model = openrouterPayload.model
-          logEntry.clientRequest = sanitizeForLog(replaceReferenceDataUrls({ topicId, payload }, refUrlMap))
-          logEntry.upstreamRequest = sanitizeForLog(replaceReferenceDataUrls(openrouterPayload, refUrlMap))
+          logEntry.clientRequest = sanitizeForLog(
+            replaceReferenceDataUrls({ topicId, payload }, refUrlMap),
+          )
+          logEntry.upstreamRequest = sanitizeForLog(
+            replaceReferenceDataUrls(openrouterPayload, refUrlMap),
+          )
           logEntry.upstreamResponse = sanitizeForLog(replaceB64WithLocalPath(response, images))
           logEntry.clientResponse = sanitizeForLog(result)
           // 提取生成的图片 URL 列表，供日志列表页直接展示缩略图
@@ -351,8 +368,13 @@ const app = createApp({
         logEntry.status = 'error'
         logEntry.providerName = logEntry.providerName || ''
         logEntry.errorMessage = err?.message || String(err)
-        logEntry.clientRequest = sanitizeForLog(replaceReferenceDataUrls({ topicId, payload }, refUrlMap))
-        if (openrouterPayload) logEntry.upstreamRequest = sanitizeForLog(replaceReferenceDataUrls(openrouterPayload, refUrlMap))
+        logEntry.clientRequest = sanitizeForLog(
+          replaceReferenceDataUrls({ topicId, payload }, refUrlMap),
+        )
+        if (openrouterPayload)
+          logEntry.upstreamRequest = sanitizeForLog(
+            replaceReferenceDataUrls(openrouterPayload, refUrlMap),
+          )
         if (response) logEntry.upstreamResponse = sanitizeForLog(response)
         logEntry.durationMs = Date.now() - logStartTime
         await usageLogger.log(logEntry)

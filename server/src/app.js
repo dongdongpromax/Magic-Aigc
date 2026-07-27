@@ -10,6 +10,7 @@ import { createSettingsRoutes } from './modules/settings/routes.js'
 import { createTopicRoutes } from './modules/topics/routes.js'
 import { createUsageLogRoutes } from './modules/logs/routes.js'
 import { createStatsRoutes } from './modules/stats/routes.js'
+import { createPromptRoutes } from './modules/prompts/routes.js'
 
 /**
  * 判断错误是否属于客户端错误（可向调用方暴露消息）
@@ -40,6 +41,8 @@ function isClientError(error) {
  *   providersService?: object;
  *   videoService?: object;
  *   usageLogRepository?: object;
+ *   promptRepository?: object;
+ *   fileStorage?: object;
  *   healthCheck?: () => Promise<void>;
  * }} deps 依赖注入
  */
@@ -90,7 +93,11 @@ export function createApp(deps = {}) {
   // 使用日志路由：deps.usageLogRepository 未注入时（旧测试）跳过，保持向后兼容
   if (deps.usageLogRepository) {
     app.use('/api', createUsageLogRoutes({ usageLogRepository: deps.usageLogRepository }))
-    app.use('/api', createStatsRoutes({ usageLogRepository: deps.usageLogRepository }))
+    app.use('/api', createStatsRoutes({ usageLogRepository: deps.usageLogRepository, promptRepository: deps.promptRepository }))
+  }
+  // 提示词库路由：deps.promptRepository 未注入时（旧测试）跳过，保持向后兼容
+  if (deps.promptRepository) {
+    app.use('/api', createPromptRoutes({ promptRepository: deps.promptRepository, fileStorage: deps.fileStorage }))
   }
 
   // P0-6: 错误处理中间件分类脱敏

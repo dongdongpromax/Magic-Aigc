@@ -217,6 +217,25 @@ export async function migrateProvidersSchema(pool) {
   await pool.query(
     'UPDATE app_settings SET timeout = 1800000 WHERE timeout = 1200000 OR timeout IS NULL',
   )
+
+  // 提示词库表：存储视频/图片/音频/文本四类提示词及其效果素材
+  // - tags：自定义标签数组（如 ["赛博朋克","人物特写"]），JSON 存储
+  // - assets：效果素材数组（{url,mimeType,kind,name}），与 usage_logs.result_files 模式一致
+  // - 素材文件落盘到 server/storage/prompts/，通过 /files/prompts/ 静态服务访问
+  await pool.query(`CREATE TABLE IF NOT EXISTS prompts (
+    id VARCHAR(64) PRIMARY KEY,
+    title VARCHAR(200) NOT NULL,
+    content TEXT NOT NULL,
+    type VARCHAR(20) NOT NULL,
+    tags JSON NOT NULL DEFAULT '[]',
+    assets JSON NOT NULL DEFAULT '[]',
+    notes TEXT NULL,
+    sort_order INT NOT NULL DEFAULT 0,
+    created_at BIGINT NOT NULL,
+    updated_at BIGINT NOT NULL,
+    INDEX idx_prompts_type (type),
+    INDEX idx_prompts_created (created_at DESC)
+  )`)
 }
 
 /**
