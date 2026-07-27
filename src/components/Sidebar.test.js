@@ -58,7 +58,7 @@ describe('Sidebar', () => {
     document.body.innerHTML = ''
   })
 
-  it('显示创作工坊并支持新建创作', async () => {
+  it('支持新建创作', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     const router = createTestRouter()
@@ -70,7 +70,6 @@ describe('Sidebar', () => {
       },
     })
 
-    expect(wrapper.text()).toContain('创作工坊')
     expect(wrapper.text()).toContain('新建创作')
 
     const store = useChatStore()
@@ -193,25 +192,5 @@ describe('Sidebar', () => {
 
     // 取消时不应调 deleteTopic
     expect(deleteTopicSpy).not.toHaveBeenCalled()
-  })
-
-  it('底部含使用日志入口，点击跳转 /logs', async () => {
-    const pinia = createPinia()
-    setActivePinia(pinia)
-    const router = createTestRouter()
-    await router.isReady()
-
-    const wrapper = mount(Sidebar, {
-      global: { plugins: [pinia, router] },
-    })
-
-    const logsEntry = wrapper.find('[data-action="open-logs"]')
-    expect(logsEntry.exists()).toBe(true)
-    expect(logsEntry.text()).toContain('使用日志')
-
-    await logsEntry.trigger('click')
-    await flushPromises()
-
-    expect(router.currentRoute.value.path).toBe('/logs')
   })
 })

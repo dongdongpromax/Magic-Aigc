@@ -1,17 +1,17 @@
 <script setup>
 import { computed, reactive, ref } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
 import { useChatStore } from '@/store/chat'
-import { Plus, Search, Image as ImageIcon, Aperture, Trash2, ScrollText } from 'lucide-vue-next'
+import {
+  Plus,
+  Search,
+  Image as ImageIcon,
+  Trash2,
+} from 'lucide-vue-next'
 import ConfirmDialog from './ConfirmDialog.vue'
 
 const chatStore = useChatStore()
-const route = useRoute()
-const router = useRouter()
 const keyword = ref('')
 
-// 当前是否处于使用日志页，用于高亮侧栏入口
-const isLogsRoute = computed(() => route.path.startsWith('/logs'))
 // 正在删除的主题 ID，用于禁用对应按钮防重复点击
 const deletingTopicId = ref('')
 // 删除二次确认弹窗状态（替代原生 window.confirm，确保确认动作可见可靠）
@@ -26,13 +26,6 @@ const filteredTopics = computed(() => {
 
 const handleNewTopic = () => {
   chatStore.createTopic('新建创作')
-}
-
-/**
- * 跳转到使用日志页
- */
-const goToLogs = () => {
-  router.push('/logs')
 }
 
 const handleSelectTopic = (topicId) => {
@@ -94,16 +87,6 @@ const handleConfirmDelete = async () => {
 <template>
   <div class="sidebar">
     <div class="sidebar-header">
-      <div class="brand">
-        <div class="brand-icon">
-          <Aperture :size="18" />
-        </div>
-        <div class="brand-copy">
-          <span class="brand-title">创作工坊</span>
-          <span class="brand-subtitle">图像 · 视频 对话创作</span>
-        </div>
-      </div>
-
       <button class="action-btn" type="button" @click="handleNewTopic">
         <Plus :size="16" />
         <span>新建创作</span>
@@ -158,20 +141,6 @@ const handleConfirmDelete = async () => {
       </div>
     </div>
 
-    <!-- 底部导航：使用日志入口 -->
-    <div class="sidebar-footer">
-      <button
-        class="nav-entry"
-        type="button"
-        :class="{ active: isLogsRoute }"
-        data-action="open-logs"
-        @click="goToLogs"
-      >
-        <ScrollText :size="16" />
-        <span>使用日志</span>
-      </button>
-    </div>
-
     <!-- 删除二次确认 -->
     <ConfirmDialog
       v-model:show="deleteConfirm.show"
@@ -204,41 +173,6 @@ const handleConfirmDelete = async () => {
   display: flex;
   flex-direction: column;
   gap: 14px;
-}
-
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-
-  .brand-icon {
-    width: 34px;
-    height: 34px;
-    border-radius: 12px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: linear-gradient(135deg, rgba(119, 168, 255, 0.18), rgba(255, 255, 255, 0.04));
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.28);
-  }
-}
-
-.brand-copy {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.brand-title {
-  font-size: 15px;
-  font-weight: 600;
-  color: $text-primary;
-}
-
-.brand-subtitle {
-  font-size: 12px;
-  color: $text-secondary;
 }
 
 .action-btn {
@@ -396,39 +330,6 @@ const handleConfirmDelete = async () => {
   &:disabled {
     cursor: not-allowed;
     opacity: 0.5;
-  }
-}
-
-/* 底部导航：使用日志入口 */
-.sidebar-footer {
-  flex-shrink: 0;
-  padding: 12px;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-.nav-entry {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  padding: 10px 12px;
-  border: 1px solid transparent;
-  border-radius: 3px;
-  background: transparent;
-  color: $text-secondary;
-  font-size: 13px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-
-  &:hover {
-    background-color: rgba(255, 255, 255, 0.04);
-    color: $text-primary;
-  }
-
-  &.active {
-    background-color: rgba(119, 168, 255, 0.08);
-    border-color: rgba(119, 168, 255, 0.14);
-    color: $text-primary;
   }
 }
 
