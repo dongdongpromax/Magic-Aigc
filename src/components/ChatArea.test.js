@@ -4,6 +4,9 @@
  * ChatArea 的 onMounted 会调 chatStore.bootstrap()，后者会调真实的
  * getSettings / listTopics，触发 jsdom 网络错误。这里 mock 掉
  * @/services/settingsApi 和 @/services/chatApi，阻断真实网络请求。
+ *
+ * ChatArea 一键使用提示词用到 useRoute/useRouter，这里 mock vue-router
+ * 提供空 query，避免无 router 上下文时 route 为 undefined 报错。
  */
 import { flushPromises, shallowMount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
@@ -11,6 +14,17 @@ import { describe, expect, it, vi } from 'vitest'
 import ChatArea from './ChatArea.vue'
 import VideoMessageCard from './VideoMessageCard.vue'
 import { useChatStore } from '@/store/chat'
+
+// mock vue-router：提供空 query 与 replace，供 ChatArea 一键使用逻辑安全运行
+vi.mock('vue-router', () => ({
+  useRoute: () => ({ query: {} }),
+  useRouter: () => ({ replace: vi.fn().mockResolvedValue(undefined) }),
+}))
+
+// mock promptApi：一键使用时会调 getPromptDetail，返回 null 让其提前返回
+vi.mock('@/services/promptApi', () => ({
+  getPromptDetail: vi.fn().mockResolvedValue(null),
+}))
 
 // 阻断 bootstrap 中的真实网络调用，避免 unhandled rejection
 vi.mock('@/services/settingsApi', () => ({

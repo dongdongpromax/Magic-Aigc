@@ -25,7 +25,7 @@ const entries = [
 ]
 
 // 使用统计
-const stats = ref({ totalGenerations: 0, imageCount: 0, videoCount: 0 })
+const stats = ref({ totalGenerations: 0, imageCount: 0, videoCount: 0, promptCount: 0 })
 
 // 最近创作会话（取最近 8 个）
 const recentTopics = ref([])
@@ -110,6 +110,13 @@ function topicCover(topic) {
           <div class="stat-body">
             <span class="stat-value">{{ stats.videoCount }}</span>
             <span class="stat-label">视频生成</span>
+          </div>
+        </div>
+        <div class="stat-card">
+          <Library :size="18" class="stat-icon" />
+          <div class="stat-body">
+            <span class="stat-value">{{ stats.promptCount }}</span>
+            <span class="stat-label">提示词数</span>
           </div>
         </div>
       </div>
@@ -224,7 +231,7 @@ function topicCover(topic) {
 /* 统计卡片 */
 .stats-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 14px;
 }
 

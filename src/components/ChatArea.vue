@@ -1,7 +1,10 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { Maximize2, Minimize2 } from 'lucide-vue-next'
 import { useChatStore } from '@/store/chat'
+import { useProvidersStore } from '@/store/providers'
+import { getPromptDetail } from '@/services/promptApi'
 import { triggerBrowserDownload } from '@/utils/download'
 import ImageMessageCard from './ImageMessageCard.vue'
 import VideoMessageCard from './VideoMessageCard.vue'
@@ -10,6 +13,9 @@ import MessageBubble from './MessageBubble.vue'
 import SettingsModal from './settings/SettingsModal.vue'
 
 const chatStore = useChatStore()
+const providersStore = useProvidersStore()
+const route = useRoute()
+const router = useRouter()
 
 const currentMessages = computed(() => {
   return chatStore.currentMessages
@@ -185,9 +191,71 @@ function handleWindowKeydown(event) {
   }
 }
 
-onMounted(() => {
+/**
+ * 按提示词类型自动选中第一个启用的对应类型模型
+ *
+ * 一键使用提示词时，根据 prompt.type 切换到匹配的模型：
+ * - video → 第一个 isVideo=true 的启用模型
+ * - image → 第一个 isImage=true 的启用模型
+ * - audio / text → 保持当前模型（项目暂无音频/文本生成模型）
+ *
+ * @param {string} type 提示词类型
+ */
+function selectModelByPromptType(type) {
+  if (type !== 'video' && type !== 'image') return
+  const providers = providersStore.enabledProviders
+  for (const provider of providers) {
+    if (!provider.enabledModels) continue
+    const model = provider.enabledModels.find((m) =>
+      type === 'video' ? m.isVideo : m.isImage,
+    )
+    if (model) {
+      const draft = chatStore.currentDraft
+      draft.providerId = provider.id
+      draft.model = model.modelId
+      return
+    }
+  }
+}
+
+/**
+ * 一键使用提示词：从 route.query.promptId 加载提示词，填充 draft.prompt 并按类型选模型
+ *
+ * 流程：
+ * 1. 检测 query.promptId，立即清除 query（router.replace），避免刷新重复填充
+ * 2. 确保 providers 已加载（才能按类型选模型）
+ * 3. 调 getPromptDetail 拉取提示词详情
+ * 4. 填充 draft.prompt，按 type 自动选模型
+ * 5. draft 变更会触发 store 的 watch 自动持久化
+ *
+ * 失败时写 lastError，不阻断页面渲染。
+ */
+async function applyPromptFromQuery() {
+  const promptId = route.query.promptId
+  if (!promptId) return
+
+  // 立即清除 query，避免刷新或返回时重复填充
+  await router.replace({ query: {} })
+
+  try {
+    // 确保 providers 已加载，才能按类型选模型
+    await providersStore.loadProviders()
+    const prompt = await getPromptDetail(String(promptId))
+    if (!prompt) return
+
+    const draft = chatStore.currentDraft
+    draft.prompt = prompt.content || ''
+    selectModelByPromptType(prompt.type)
+  } catch (err) {
+    chatStore.lastError = `加载提示词失败：${err?.response?.data?.message || err?.message || ''}`
+  }
+}
+
+onMounted(async () => {
   chatStore.bootstrap()
   window.addEventListener('keydown', handleWindowKeydown)
+  // bootstrap 后处理一键使用提示词的 query（不阻塞渲染，失败仅写 lastError）
+  await applyPromptFromQuery()
 })
 
 onBeforeUnmount(() => {
