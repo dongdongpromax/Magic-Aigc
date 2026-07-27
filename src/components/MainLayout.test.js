@@ -13,7 +13,7 @@ describe('MainLayout', () => {
         plugins: [pinia],
         stubs: {
           Sidebar: true,
-          ChatArea: true,
+          TopNav: true,
         },
       },
     })

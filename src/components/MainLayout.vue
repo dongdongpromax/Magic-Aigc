@@ -1,25 +1,29 @@
 <script setup>
 import { computed } from 'vue'
 import Sidebar from './Sidebar.vue'
+import TopNav from './TopNav.vue'
 import { useChatStore } from '@/store/chat'
 
 const chatStore = useChatStore()
-// 改动2: 聊天区全屏时隐藏侧栏，内容区铺满整个窗口
+// 改动2: 聊天区全屏时隐藏侧栏与顶栏，内容区铺满整个窗口
 const isFullscreen = computed(() => chatStore.isChatFullscreen)
 </script>
 
 <template>
   <div class="main-layout" :class="{ 'is-fullscreen': isFullscreen }">
-    <Sidebar />
-    <div class="content-wrapper">
-      <div class="background-scene" aria-hidden="true">
-        <div class="cyber-grid-bg"></div>
-        <div class="ambient-glow"></div>
-        <div class="particle-orbit"></div>
-        <div class="particle-dust"></div>
-        <div class="particle-vignette"></div>
+    <TopNav />
+    <div class="body-wrapper">
+      <Sidebar />
+      <div class="content-wrapper">
+        <div class="background-scene" aria-hidden="true">
+          <div class="cyber-grid-bg"></div>
+          <div class="ambient-glow"></div>
+          <div class="particle-orbit"></div>
+          <div class="particle-dust"></div>
+          <div class="particle-vignette"></div>
+        </div>
+        <router-view />
       </div>
-      <router-view />
     </div>
   </div>
 </template>
@@ -29,14 +33,30 @@ const isFullscreen = computed(() => chatStore.isChatFullscreen)
 
 .main-layout {
   display: flex;
+  flex-direction: column;
   width: 100%;
   height: 100%;
   background-color: $bg-base;
 }
 
-/* 改动2: 全屏时把侧栏滑出视口，内容区自动铺满；:deep 穿透到 Sidebar 根元素 */
+/* 顶栏 + 侧栏 + 内容区的横向容器 */
+.body-wrapper {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
+/* 改动2: 全屏时把侧栏滑出视口、顶栏上移隐藏，内容区自动铺满；:deep 穿透到子组件根元素 */
+:deep(.top-nav) {
+  transition: transform 0.3s ease;
+}
+
 :deep(.sidebar) {
   transition: margin-left 0.3s ease;
+}
+
+.main-layout.is-fullscreen :deep(.top-nav) {
+  transform: translateY(-100%);
 }
 
 .main-layout.is-fullscreen :deep(.sidebar) {
