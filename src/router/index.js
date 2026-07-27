@@ -7,6 +7,7 @@ import MainLayout from '@/components/MainLayout.vue'
  * 两个主路由共用 MainLayout（侧边栏 + 背景动效），仅内容区切换：
  * - /chat → 聊天创作页（ChatArea）
  * - /logs → 使用日志页（UsageLogPage）
+ * - /canvas → 漫剧自由画布页（独立全屏布局，不套 MainLayout）
  *
  * 根路径重定向到 /chat，保证刷新/直接访问时不白屏。
  */
@@ -14,6 +15,11 @@ export const routes = [
   {
     path: '/',
     redirect: '/chat',
+  },
+  {
+    path: '/canvas',
+    name: 'canvas',
+    component: () => import('@/pages/ComicCanvasPage.vue'),
   },
   {
     path: '/chat',
