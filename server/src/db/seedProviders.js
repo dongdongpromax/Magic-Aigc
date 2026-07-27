@@ -222,13 +222,15 @@ export async function migrateProvidersSchema(pool) {
   // - tags：自定义标签数组（如 ["赛博朋克","人物特写"]），JSON 存储
   // - assets：效果素材数组（{url,mimeType,kind,name}），与 usage_logs.result_files 模式一致
   // - 素材文件落盘到 server/storage/prompts/，通过 /files/prompts/ 静态服务访问
+  // tags / assets 用 JSON 列，允许 NULL（MySQL 不允许 JSON 列设字符串字面量默认值）
+  // 应用层 parseJsonArray 已兼容 null，读取时回退为 []
   await pool.query(`CREATE TABLE IF NOT EXISTS prompts (
     id VARCHAR(64) PRIMARY KEY,
     title VARCHAR(200) NOT NULL,
     content TEXT NOT NULL,
     type VARCHAR(20) NOT NULL,
-    tags JSON NOT NULL DEFAULT '[]',
-    assets JSON NOT NULL DEFAULT '[]',
+    tags JSON NULL,
+    assets JSON NULL,
     notes TEXT NULL,
     sort_order INT NOT NULL DEFAULT 0,
     created_at BIGINT NOT NULL,

@@ -9,6 +9,8 @@ import {
   ImageIcon,
   VideoIcon,
   Sparkles,
+  ArrowRight,
+  Clock,
 } from 'lucide-vue-next'
 import { useChatStore } from '@/store/chat'
 import { getStatsSummary } from '@/services/statsApi'
@@ -16,18 +18,23 @@ import { getStatsSummary } from '@/services/statsApi'
 const router = useRouter()
 const chatStore = useChatStore()
 
-// 功能入口配置
+// 功能入口配置 — 每项带独立强调色，增强视觉层次
 const entries = [
-  { label: '聊天创作', desc: '对话式图像/视频生成', path: '/chat', icon: MessageSquare },
-  { label: '创作画布', desc: '漫剧自由画布', path: '/canvas', icon: Clapperboard },
-  { label: '提示词库', desc: '提示词管理与复用', path: '/prompts', icon: Library },
-  { label: '使用日志', desc: '生成记录与详情', path: '/logs', icon: ScrollText },
+  { label: '聊天创作', desc: '对话式生成图像与视频', path: '/chat', icon: MessageSquare, color: '#77a8ff' },
+  { label: '创作画布', desc: '漫剧自由编排画布', path: '/canvas', icon: Clapperboard, color: '#9d7cff' },
+  { label: '提示词库', desc: '提示词管理与复用', path: '/prompts', icon: Library, color: '#23d4b4' },
+  { label: '使用日志', desc: '生成记录与详情', path: '/logs', icon: ScrollText, color: '#f5a623' },
 ]
 
-// 使用统计
-const stats = ref({ totalGenerations: 0, imageCount: 0, videoCount: 0, promptCount: 0 })
+// 统计项配置
+const statItems = [
+  { key: 'totalGenerations', label: '累计生成', icon: Sparkles, color: '#77a8ff' },
+  { key: 'imageCount', label: '图片生成', icon: ImageIcon, color: '#23d4b4' },
+  { key: 'videoCount', label: '视频生成', icon: VideoIcon, color: '#9d7cff' },
+  { key: 'promptCount', label: '提示词数', icon: Library, color: '#f5a623' },
+]
 
-// 最近创作会话（取最近 8 个）
+const stats = ref({ totalGenerations: 0, imageCount: 0, videoCount: 0, promptCount: 0 })
 const recentTopics = ref([])
 
 onMounted(async () => {
@@ -59,89 +66,137 @@ function goTopic(topicId) {
 function topicCover(topic) {
   return topic.coverImage || ''
 }
+
+/** 相对时间格式化 */
+function relativeTime(ts) {
+  if (!ts) return ''
+  const diff = Date.now() - ts
+  const min = Math.floor(diff / 60000)
+  if (min < 1) return '刚刚'
+  if (min < 60) return `${min} 分钟前`
+  const hr = Math.floor(min / 60)
+  if (hr < 24) return `${hr} 小时前`
+  const day = Math.floor(hr / 24)
+  if (day < 30) return `${day} 天前`
+  return new Date(ts).toLocaleDateString('zh-CN')
+}
 </script>
 
 <template>
   <div class="home-page">
-    <!-- ① 功能入口卡片 -->
-    <section class="section">
-      <h3 class="section-title">功能入口</h3>
-      <div class="entry-grid">
-        <button
-          v-for="entry in entries"
-          :key="entry.path"
-          type="button"
-          class="entry-card"
-          data-role="entry-card"
-          :data-path="entry.path"
-          @click="goEntry(entry.path)"
-        >
-          <div class="entry-icon">
-            <component :is="entry.icon" :size="22" />
-          </div>
-          <div class="entry-text">
-            <span class="entry-label">{{ entry.label }}</span>
-            <span class="entry-desc">{{ entry.desc }}</span>
-          </div>
-        </button>
-      </div>
-    </section>
+    <div class="home-inner">
+      <!-- ① Hero 区域 -->
+      <section class="hero">
+        <div class="hero-badge">
+          <Sparkles :size="13" />
+          <span>AI 创作工坊</span>
+        </div>
+        <h1 class="hero-title">让创意触手可及</h1>
+        <p class="hero-subtitle">一站式 AI 图像与视频创作平台，从提示词到成品，全流程在线完成</p>
+        <div class="hero-actions">
+          <button type="button" class="cta-btn" @click="goEntry('/chat')">
+            <MessageSquare :size="16" />
+            <span>开始创作</span>
+            <ArrowRight :size="15" />
+          </button>
+          <button type="button" class="cta-btn--ghost" @click="goEntry('/prompts')">
+            <Library :size="15" />
+            <span>浏览提示词</span>
+          </button>
+        </div>
+      </section>
 
-    <!-- ② 使用统计 -->
-    <section class="section">
-      <h3 class="section-title">使用统计</h3>
-      <div class="stats-grid">
-        <div class="stat-card">
-          <Sparkles :size="18" class="stat-icon" />
-          <div class="stat-body">
-            <span class="stat-value">{{ stats.totalGenerations }}</span>
-            <span class="stat-label">累计生成</span>
-          </div>
+      <!-- ② 功能入口 -->
+      <section class="section">
+        <div class="section-header">
+          <h3 class="section-title">功能入口</h3>
         </div>
-        <div class="stat-card">
-          <ImageIcon :size="18" class="stat-icon" />
-          <div class="stat-body">
-            <span class="stat-value">{{ stats.imageCount }}</span>
-            <span class="stat-label">图片生成</span>
-          </div>
+        <div class="entry-grid">
+          <button
+            v-for="entry in entries"
+            :key="entry.path"
+            type="button"
+            class="entry-card"
+            data-role="entry-card"
+            :data-path="entry.path"
+            :style="{ '--card-color': entry.color }"
+            @click="goEntry(entry.path)"
+          >
+            <div class="entry-icon">
+              <component :is="entry.icon" :size="22" />
+            </div>
+            <div class="entry-text">
+              <span class="entry-label">{{ entry.label }}</span>
+              <span class="entry-desc">{{ entry.desc }}</span>
+            </div>
+            <ArrowRight :size="15" class="entry-arrow" />
+          </button>
         </div>
-        <div class="stat-card">
-          <VideoIcon :size="18" class="stat-icon" />
-          <div class="stat-body">
-            <span class="stat-value">{{ stats.videoCount }}</span>
-            <span class="stat-label">视频生成</span>
-          </div>
-        </div>
-        <div class="stat-card">
-          <Library :size="18" class="stat-icon" />
-          <div class="stat-body">
-            <span class="stat-value">{{ stats.promptCount }}</span>
-            <span class="stat-label">提示词数</span>
-          </div>
-        </div>
-      </div>
-    </section>
+      </section>
 
-    <!-- ③ 最近创作会话 -->
-    <section class="section">
-      <h3 class="section-title">最近创作</h3>
-      <div v-if="recentTopics.length" class="recent-row">
-        <button
-          v-for="topic in recentTopics"
-          :key="topic.id"
-          type="button"
-          class="recent-item"
-          @click="goTopic(topic.id)"
-        >
-          <div class="recent-cover">
-            <img v-if="topicCover(topic)" :src="topicCover(topic)" :alt="topic.title" loading="lazy" />
-            <MessageSquare v-else :size="20" class="recent-placeholder" />
+      <!-- ③ 数据概览 -->
+      <section class="section">
+        <div class="section-header">
+          <h3 class="section-title">数据概览</h3>
+        </div>
+        <div class="stats-row">
+          <div
+            v-for="item in statItems"
+            :key="item.key"
+            class="stat-item"
+            :style="{ '--stat-color': item.color }"
+          >
+            <div class="stat-icon">
+              <component :is="item.icon" :size="16" />
+            </div>
+            <span class="stat-value">{{ stats[item.key] }}</span>
+            <span class="stat-label">{{ item.label }}</span>
           </div>
-          <span class="recent-title">{{ topic.title }}</span>
-        </button>
-      </div>
-      <p v-else class="empty-hint">暂无创作会话，点击「聊天创作」开始</p>
-    </section>
+        </div>
+      </section>
+
+      <!-- ④ 最近创作 -->
+      <section class="section">
+        <div class="section-header">
+          <h3 class="section-title">最近创作</h3>
+          <button type="button" class="section-more" @click="goEntry('/chat')">
+            <span>查看全部</span>
+            <ArrowRight :size="13" />
+          </button>
+        </div>
+        <div v-if="recentTopics.length" class="recent-grid">
+          <button
+            v-for="topic in recentTopics"
+            :key="topic.id"
+            type="button"
+            class="recent-card"
+            @click="goTopic(topic.id)"
+          >
+            <div class="recent-cover">
+              <img v-if="topicCover(topic)" :src="topicCover(topic)" :alt="topic.title" loading="lazy" />
+              <MessageSquare v-else :size="22" class="recent-placeholder" />
+            </div>
+            <div class="recent-info">
+              <span class="recent-title">{{ topic.title }}</span>
+              <span class="recent-time">
+                <Clock :size="11" />
+                {{ relativeTime(topic.updatedAt) }}
+              </span>
+            </div>
+          </button>
+        </div>
+        <div v-else class="empty-state">
+          <div class="empty-icon">
+            <Clapperboard :size="28" />
+          </div>
+          <p class="empty-text">还没有创作记录</p>
+          <button type="button" class="empty-cta" @click="goEntry('/chat')">
+            <MessageSquare :size="14" />
+            <span>开始第一次创作</span>
+          </button>
+        </div>
+      </section>
+    </div>
   </div>
 </template>
 
@@ -151,29 +206,147 @@ function topicCover(topic) {
 .home-page {
   height: 100%;
   overflow-y: auto;
-  padding: 32px 40px;
-  display: flex;
-  flex-direction: column;
-  gap: 32px;
+  /* 半透明实色背景遮盖 MainLayout 粒子动效，营造干净商务感 */
+  background: rgba(8, 10, 14, 0.82);
+  backdrop-filter: blur(6px);
 }
 
+.home-inner {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 48px 40px 64px;
+  display: flex;
+  flex-direction: column;
+  gap: 40px;
+}
+
+/* ① Hero */
+.hero {
+  text-align: center;
+  padding: 40px 0 8px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.hero-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 14px;
+  border: 1px solid rgba(119, 168, 255, 0.25);
+  border-radius: 3px;
+  background: rgba(119, 168, 255, 0.08);
+  color: rgba(119, 168, 255, 0.9);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.hero-title {
+  margin: 0;
+  font-size: 36px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: $text-primary;
+  line-height: 1.2;
+}
+
+.hero-subtitle {
+  margin: 0;
+  max-width: 520px;
+  font-size: 14px;
+  line-height: 1.7;
+  color: $text-secondary;
+}
+
+.hero-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.cta-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 24px;
+  border: none;
+  border-radius: 3px;
+  background: $accent-color;
+  color: #0b0e13;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s ease, transform 0.15s ease;
+
+  &:hover {
+    background: $accent-color-hover;
+    transform: translateY(-1px);
+  }
+}
+
+.cta-btn--ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 24px;
+  border: 1px solid $border-color;
+  border-radius: 3px;
+  background: transparent;
+  color: $text-secondary;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+
+  &:hover {
+    border-color: $border-light;
+    color: $text-primary;
+    background: rgba(255, 255, 255, 0.03);
+  }
+}
+
+/* 通用 section */
 .section {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 
 .section-title {
   margin: 0;
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 600;
   color: $text-primary;
-  padding-left: 8px;
-  border-left: 2px solid rgba(119, 168, 255, 0.6);
+  padding-left: 10px;
+  border-left: 3px solid $accent-color;
   line-height: 1.2;
 }
 
-/* 功能入口卡片网格 */
+.section-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: none;
+  background: transparent;
+  color: $text-secondary;
+  font-size: 12px;
+  cursor: pointer;
+  transition: color 0.2s ease;
+
+  &:hover {
+    color: $text-primary;
+  }
+}
+
+/* ② 功能入口卡片 */
 .entry-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -183,38 +356,70 @@ function topicCover(topic) {
 .entry-card {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 18px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  gap: 14px;
+  padding: 20px;
+  border: 1px solid $border-color;
   border-radius: 3px;
-  background: rgba(18, 22, 28, 0.6);
+  background: rgba(18, 22, 28, 0.7);
   cursor: pointer;
   transition: all 0.2s ease;
   text-align: left;
+  position: relative;
+  overflow: hidden;
+
+  /* 左侧强调色条 */
+  &::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 3px;
+    background: var(--card-color);
+    opacity: 0.5;
+    transition: opacity 0.2s ease;
+  }
 
   &:hover {
-    border-color: rgba(119, 168, 255, 0.3);
-    background: rgba(119, 168, 255, 0.06);
+    border-color: var(--card-color);
+    background: rgba(18, 22, 28, 0.9);
+    transform: translateY(-2px);
+
+    &::before {
+      opacity: 1;
+    }
+
+    .entry-arrow {
+      opacity: 1;
+      transform: translateX(0);
+      color: var(--card-color);
+    }
+
+    .entry-icon {
+      background: color-mix(in srgb, var(--card-color) 18%, transparent);
+    }
   }
 }
 
 .entry-icon {
-  width: 40px;
-  height: 40px;
-  border-radius: 6px;
+  width: 42px;
+  height: 42px;
+  border-radius: 3px;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(119, 168, 255, 0.1);
-  color: rgba(119, 168, 255, 0.9);
+  background: color-mix(in srgb, var(--card-color) 10%, transparent);
+  color: var(--card-color);
   flex-shrink: 0;
+  transition: background 0.2s ease;
 }
 
 .entry-text {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 4px;
   min-width: 0;
+  flex: 1;
 }
 
 .entry-label {
@@ -226,78 +431,110 @@ function topicCover(topic) {
 .entry-desc {
   font-size: 12px;
   color: $text-secondary;
+  line-height: 1.4;
 }
 
-/* 统计卡片 */
-.stats-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 14px;
-}
-
-.stat-card {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 18px 20px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 3px;
-  background: rgba(18, 22, 28, 0.6);
-}
-
-.stat-icon {
-  color: rgba(119, 168, 255, 0.8);
+.entry-arrow {
+  color: $text-muted;
+  opacity: 0;
+  transform: translateX(-6px);
+  transition: all 0.2s ease;
   flex-shrink: 0;
 }
 
-.stat-body {
+/* ③ 数据概览 */
+.stats-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border: 1px solid $border-color;
+  border-radius: 3px;
+  background: rgba(18, 22, 28, 0.7);
+  overflow: hidden;
+}
+
+.stat-item {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  align-items: center;
+  gap: 12px;
+  padding: 20px 24px;
+  position: relative;
+
+  /* 列间分隔线 */
+  &:not(:last-child)::after {
+    content: '';
+    position: absolute;
+    right: 0;
+    top: 20%;
+    bottom: 20%;
+    width: 1px;
+    background: $border-color;
+  }
+}
+
+.stat-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--stat-color) 12%, transparent);
+  color: var(--stat-color);
+  flex-shrink: 0;
 }
 
 .stat-value {
-  font-size: 24px;
+  font-size: 26px;
   font-weight: 700;
   color: $text-primary;
   line-height: 1.1;
+  font-variant-numeric: tabular-nums;
 }
 
 .stat-label {
   font-size: 12px;
   color: $text-secondary;
+  white-space: nowrap;
 }
 
-/* 最近创作会话 */
-.recent-row {
-  display: flex;
+/* ④ 最近创作 */
+.recent-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 14px;
-  overflow-x: auto;
-  padding-bottom: 4px;
 }
 
-.recent-item {
+.recent-card {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
   padding: 0;
   border: none;
   background: transparent;
   cursor: pointer;
-  flex-shrink: 0;
-  width: 140px;
+  text-align: left;
+  transition: transform 0.2s ease;
+
+  &:hover {
+    transform: translateY(-2px);
+
+    .recent-cover {
+      border-color: $border-light;
+    }
+  }
 }
 
 .recent-cover {
-  width: 140px;
-  height: 100px;
+  width: 100%;
+  aspect-ratio: 4 / 3;
   border-radius: 3px;
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  background: rgba(18, 22, 28, 0.6);
+  border: 1px solid $border-color;
+  background: rgba(18, 22, 28, 0.8);
   display: flex;
   align-items: center;
   justify-content: center;
+  transition: border-color 0.2s ease;
 
   img {
     width: 100%;
@@ -307,21 +544,77 @@ function topicCover(topic) {
 }
 
 .recent-placeholder {
-  color: $text-secondary;
+  color: $text-muted;
+}
+
+.recent-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .recent-title {
-  font-size: 12px;
-  color: $text-secondary;
+  font-size: 13px;
+  font-weight: 500;
+  color: $text-primary;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  text-align: left;
 }
 
-.empty-hint {
+.recent-time {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: $text-muted;
+}
+
+/* 空状态 */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 48px 0;
+  border: 1px dashed $border-color;
+  border-radius: 3px;
+  background: rgba(18, 22, 28, 0.4);
+}
+
+.empty-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(119, 168, 255, 0.06);
+  color: $text-muted;
+}
+
+.empty-text {
   margin: 0;
-  font-size: 13px;
+  font-size: 14px;
   color: $text-secondary;
+}
+
+.empty-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 20px;
+  border: 1px solid rgba(119, 168, 255, 0.3);
+  border-radius: 3px;
+  background: rgba(119, 168, 255, 0.08);
+  color: rgba(119, 168, 255, 0.9);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+
+  &:hover {
+    background: rgba(119, 168, 255, 0.14);
+    border-color: rgba(119, 168, 255, 0.5);
+  }
 }
 </style>

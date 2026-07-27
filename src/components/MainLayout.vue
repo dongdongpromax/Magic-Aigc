@@ -1,19 +1,23 @@
 <script setup>
 import { computed } from 'vue'
+import { useRoute } from 'vue-router'
 import Sidebar from './Sidebar.vue'
 import TopNav from './TopNav.vue'
 import { useChatStore } from '@/store/chat'
 
+const route = useRoute()
 const chatStore = useChatStore()
 // 改动2: 聊天区全屏时隐藏侧栏与顶栏，内容区铺满整个窗口
 const isFullscreen = computed(() => chatStore.isChatFullscreen)
+// 仅聊天页显示左侧会话列表侧栏，其他页面内容区铺满
+const showSidebar = computed(() => route?.path?.startsWith('/chat') ?? false)
 </script>
 
 <template>
   <div class="main-layout" :class="{ 'is-fullscreen': isFullscreen }">
     <TopNav />
     <div class="body-wrapper">
-      <Sidebar />
+      <Sidebar v-if="showSidebar" />
       <div class="content-wrapper">
         <div class="background-scene" aria-hidden="true">
           <div class="cyber-grid-bg"></div>
