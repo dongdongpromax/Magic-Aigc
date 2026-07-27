@@ -279,4 +279,24 @@ describe('usageLogRepository', () => {
     const count = await repo.deleteAll()
     expect(count).toBe(42)
   })
+
+  it('countByType 按 type 聚合返回 image/video/total 计数', async () => {
+    const pool = createMockPool([
+      [/GROUP BY type/, [{ type: 'image', cnt: 12 }, { type: 'video', cnt: 5 }]],
+    ])
+    const repo = createUsageLogRepository(pool)
+
+    const result = await repo.countByType()
+
+    expect(result).toEqual({ image: 12, video: 5, total: 17 })
+  })
+
+  it('countByType 无数据时返回全 0', async () => {
+    const pool = createMockPool([[/GROUP BY type/, []]])
+    const repo = createUsageLogRepository(pool)
+
+    const result = await repo.countByType()
+
+    expect(result).toEqual({ image: 0, video: 0, total: 0 })
+  })
 })

@@ -166,5 +166,19 @@ export function createUsageLogRepository(pool) {
       const [result] = await pool.query('DELETE FROM usage_logs')
       return result.affectedRows
     },
+
+    /** 按 type 聚合统计：返回 { image, video, total } */
+    async countByType() {
+      const [rows] = await pool.query(
+        'SELECT type, COUNT(*) AS cnt FROM usage_logs GROUP BY type',
+      )
+      const result = { image: 0, video: 0, total: 0 }
+      for (const row of rows) {
+        if (row.type === 'image') result.image = Number(row.cnt)
+        if (row.type === 'video') result.video = Number(row.cnt)
+        result.total += Number(row.cnt)
+      }
+      return result
+    },
   }
 }
