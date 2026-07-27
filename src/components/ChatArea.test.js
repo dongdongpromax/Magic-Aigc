@@ -85,7 +85,6 @@ describe('ChatArea', () => {
       global: {
         plugins: [createPinia()],
         stubs: {
-          ConnectionBadge: true,
           ImageMessageCard: true,
           InputConsole: true,
           MessageBubble: true,
@@ -104,7 +103,6 @@ describe('ChatArea', () => {
       global: {
         plugins: [createPinia()],
         stubs: {
-          ConnectionBadge: true,
           ImageMessageCard: true,
           InputConsole: true,
           MessageBubble: true,
@@ -159,7 +157,6 @@ describe('ChatArea', () => {
       global: {
         plugins: [createPinia()],
         stubs: {
-          ConnectionBadge: true,
           ImageMessageCard: true,
           InputConsole: true,
           MessageBubble: true,
@@ -212,7 +209,6 @@ describe('ChatArea', () => {
       global: {
         plugins: [createPinia()],
         stubs: {
-          ConnectionBadge: true,
           ImageMessageCard: true,
           InputConsole: true,
           MessageBubble: true,
@@ -288,7 +284,6 @@ describe('ChatArea', () => {
       global: {
         plugins: [createPinia()],
         stubs: {
-          ConnectionBadge: true,
           ImageMessageCard: true,
           InputConsole: true,
           MessageBubble: true,
@@ -343,7 +338,6 @@ describe('ChatArea', () => {
       global: {
         plugins: [createPinia()],
         stubs: {
-          ConnectionBadge: true,
           ImageMessageCard: true,
           InputConsole: true,
           MessageBubble: true,
@@ -386,7 +380,6 @@ describe('ChatArea', () => {
       global: {
         plugins: [createPinia()],
         stubs: {
-          ConnectionBadge: true,
           ImageMessageCard: true,
           InputConsole: true,
           MessageBubble: true,

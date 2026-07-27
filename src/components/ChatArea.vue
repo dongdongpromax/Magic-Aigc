@@ -3,7 +3,6 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Maximize2, Minimize2 } from 'lucide-vue-next'
 import { useChatStore } from '@/store/chat'
 import { triggerBrowserDownload } from '@/utils/download'
-import ConnectionBadge from './ConnectionBadge.vue'
 import ImageMessageCard from './ImageMessageCard.vue'
 import VideoMessageCard from './VideoMessageCard.vue'
 import InputConsole from './InputConsole.vue'
@@ -199,11 +198,6 @@ onBeforeUnmount(() => {
 <template>
   <div class="chat-area scene-visible">
     <div class="header-actions">
-      <ConnectionBadge
-        :has-config="chatStore.hasConfig"
-        :has-error="Boolean(chatStore.lastError)"
-        @click="chatStore.openSettings"
-      />
       <button
         class="fullscreen-btn"
         type="button"
